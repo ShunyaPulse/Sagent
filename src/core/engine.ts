@@ -3,12 +3,15 @@ import {
   AgentContext,
   AgentStreamEvent,
   ToolResult,
-  LLMProvider
-} from './types.js';
-import { ToolRegistry } from '../tools/registry.js';
-import { AGENT_SYSTEM_PROMPT, formatUserMessageWithDelimiters } from './prompts.js';
-import { query } from '../db/postgres.js';
-import { env } from '../config/env.js';
+  LLMProvider,
+} from "./types.js";
+import { ToolRegistry } from "../tools/registry.js";
+import {
+  AGENT_SYSTEM_PROMPT,
+  formatUserMessageWithDelimiters,
+} from "./prompts.js";
+import { query } from "../db/postgres.js";
+import { env } from "../config/env.js";
 
 export interface ExecuteOptions {
   context: AgentContext;
@@ -24,7 +27,13 @@ export class AgentEngine {
     this.registry = registry || new ToolRegistry();
   }
 
-  async run(options: ExecuteOptions): Promise<{ finalAnswer: string; totalTokens: number; stepsExecuted: number }> {
+  async run(
+    options: ExecuteOptions,
+  ): Promise<{
+    finalAnswer: string;
+    totalTokens: number;
+    stepsExecuted: number;
+  }> {
     const { context, userMessage, provider, onEvent } = options;
     const startTime = Date.now();
     let totalTokens = 0;
@@ -42,7 +51,11 @@ export class AgentEngine {
         `INSERT INTO agent_sessions (id, tenant_id, title)
          VALUES ($1, $2, $3)
          ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
-        [context.sessionId, context.tenantId || 'default', userMessage.slice(0, 50)]
+        [
+          context.sessionId,
+          context.tenantId || "default",
+          userMessage.slice(0, 50),
+        ],
       );
 
       // 2. Fetch Short-Term Memory (Last 10 messages for conversation context)
@@ -52,7 +65,7 @@ export class AgentEngine {
          WHERE session_id = $1
          ORDER BY created_at DESC
          LIMIT 10`,
-        [context.sessionId]
+        [context.sessionId],
       );
 
       // Reconstruct chronological message history
@@ -60,21 +73,21 @@ export class AgentEngine {
         role: row.role,
         content: row.content,
         toolCalls: row.tool_calls,
-        toolResults: row.tool_results
+        toolResults: row.tool_results,
       }));
 
       // Append current user message with injection defense delimiters
       const formattedInput = formatUserMessageWithDelimiters(userMessage);
       messages.push({
-        role: 'user',
-        content: formattedInput
+        role: "user",
+        content: formattedInput,
       });
 
       // Save user message to database
       await query(
         `INSERT INTO agent_messages (session_id, role, content)
          VALUES ($1, 'user', $2)`,
-        [context.sessionId, userMessage]
+        [context.sessionId, userMessage],
       );
 
       let finalAnswer: string | undefined;
@@ -89,7 +102,7 @@ export class AgentEngine {
         const step = await provider.generateStep(
           messages,
           this.registry.getAll(),
-          AGENT_SYSTEM_PROMPT
+          AGENT_SYSTEM_PROMPT,
         );
 
         if (step.tokensUsed) {
@@ -99,9 +112,9 @@ export class AgentEngine {
         // Emit Thought Event
         if (step.thought) {
           emit({
-            type: 'thought',
+            type: "thought",
             step: stepsExecuted,
-            thought: step.thought
+            thought: step.thought,
           });
         }
 
@@ -109,9 +122,9 @@ export class AgentEngine {
         if (step.toolCalls && step.toolCalls.length > 0) {
           // Model decided to take action
           messages.push({
-            role: 'model',
-            content: step.thought || '',
-            toolCalls: step.toolCalls
+            role: "model",
+            content: step.thought || "",
+            toolCalls: step.toolCalls,
           });
 
           const currentStepResults: ToolResult[] = [];
@@ -120,10 +133,10 @@ export class AgentEngine {
             allToolCallsExecuted.push(tc);
 
             emit({
-              type: 'tool_call',
+              type: "tool_call",
               tool: tc.name,
               args: tc.arguments,
-              callId: tc.id
+              callId: tc.id,
             });
 
             // Execute through tool registry with self-correction & audit logging
@@ -131,26 +144,26 @@ export class AgentEngine {
               tc.name,
               tc.id,
               tc.arguments,
-              context
+              context,
             );
 
             currentStepResults.push(result);
             allToolResultsRecorded.push(result);
 
             emit({
-              type: 'tool_result',
+              type: "tool_result",
               tool: tc.name,
               result: result.output,
               durationMs: result.durationMs,
-              isError: result.isError
+              isError: result.isError,
             });
           }
 
           // Feed tool observations back into the message history for the next reasoning step
           messages.push({
-            role: 'tool',
-            content: '',
-            toolResults: currentStepResults
+            role: "tool",
+            content: "",
+            toolResults: currentStepResults,
           });
 
           // Continue to next turn in ReAct loop
@@ -174,19 +187,22 @@ export class AgentEngine {
       if (!finalAnswer) {
         finalAnswer = `I have analyzed the query through ${stepsExecuted} reasoning steps. Based on the gathered data: ${
           allToolResultsRecorded.length > 0
-            ? 'Tools executed successfully, but reached maximum reasoning depth limit.'
-            : 'Unable to reach a definitive conclusion within the allocated step budget.'
+            ? "Tools executed successfully, but reached maximum reasoning depth limit."
+            : "Unable to reach a definitive conclusion within the allocated step budget."
         }`;
       }
 
-      const finalAnswerStr = typeof finalAnswer === 'string'
-        ? finalAnswer
-        : (typeof (finalAnswer as any)?.finalAnswer === 'string' ? (finalAnswer as any).finalAnswer : JSON.stringify(finalAnswer, null, 2));
+      const finalAnswerStr =
+        typeof finalAnswer === "string"
+          ? finalAnswer
+          : typeof (finalAnswer as any)?.finalAnswer === "string"
+            ? (finalAnswer as any).finalAnswer
+            : JSON.stringify(finalAnswer, null, 2);
 
       // Stream the answer tokens to the client
       const chunks = finalAnswerStr.match(/.{1,12}/g) || [finalAnswerStr];
       for (const chunk of chunks) {
-        emit({ type: 'token', text: chunk });
+        emit({ type: "token", text: chunk });
       }
 
       const totalLatency = Date.now() - startTime;
@@ -201,25 +217,28 @@ export class AgentEngine {
           JSON.stringify(allToolCallsExecuted),
           JSON.stringify(allToolResultsRecorded),
           totalTokens,
-          totalLatency
-        ]
+          totalLatency,
+        ],
       );
 
       emit({
-        type: 'done',
+        type: "done",
         sessionId: context.sessionId,
         totalTokens,
-        latencyMs: totalLatency
+        latencyMs: totalLatency,
       });
 
       return {
         finalAnswer,
         totalTokens,
-        stepsExecuted
+        stepsExecuted,
       };
     } catch (err: any) {
-      console.error('❌ Agent Engine Execution Failure:', err);
-      emit({ type: 'error', message: err.message || 'Internal agent execution error' });
+      console.error("❌ Agent Engine Execution Failure:", err);
+      emit({
+        type: "error",
+        message: err.message || "Internal agent execution error",
+      });
       throw err;
     }
   }
