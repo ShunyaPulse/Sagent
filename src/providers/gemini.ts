@@ -4,11 +4,32 @@ import { LLMProvider, Message, AgentTool, StepOutput, ToolCall } from '../core/t
 import { env } from '../config/env.js';
 import { GeminiKeyRotator } from './key-rotator.js';
 
-const MODEL_PROGRESSION = [
+/**
+ * Full AI Studio Model Escalation Matrix
+ * Sorted strategically from Eco/High-Quota Fast models -> Cutting-edge Flash -> Deep Pro Reasoning
+ */
+export const FULL_GEMINI_MODELS_PROGRESSION = [
+  // 1. High-Quota Eco / Flash-Lite Tier (15 RPM / 500 RPD per key)
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite',
+  
+  // 2. Mainstream Intelligence Flash Tier (Native tool calling & fast reasoning)
   'gemini-2.5-flash',
+  'gemini-3.7-flash',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3-flash',
+  'gemini-flash-latest',
+  
+  // 3. High-Throughput Open Models (30 RPM / 14,400 RPD per key)
+  'gemma-4-26b',
+  'gemma-4-31b',
+  
+  // 4. Maximum Intelligence / Pro Synthesis Tier
   'gemini-2.5-pro',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro'
+  'gemini-3.1-pro'
 ];
 
 export class GeminiProvider implements LLMProvider {
@@ -71,8 +92,11 @@ export class GeminiProvider implements LLMProvider {
       };
     });
 
-    // Multi-Model Escalation with 34-key rotation pool
-    const modelsToTry = [this.modelName, ...MODEL_PROGRESSION.filter((m) => m !== this.modelName)];
+    // Multi-Model Escalation across ALL available AI Studio models
+    const modelsToTry = [
+      this.modelName,
+      ...FULL_GEMINI_MODELS_PROGRESSION.filter((m) => m !== this.modelName)
+    ];
     let lastError: any;
 
     for (const model of modelsToTry) {
@@ -115,7 +139,7 @@ export class GeminiProvider implements LLMProvider {
         });
       } catch (err: any) {
         lastError = err;
-        console.warn(`⚠️ Model "${model}" failed or exhausted across keys. Escalating to next model in progression...`);
+        console.warn(`⚠️ Model "${model}" hit quota/error. Auto-escalating to next model in progression...`);
       }
     }
 
@@ -132,32 +156,47 @@ export class GeminiProvider implements LLMProvider {
       parts: [{ text: m.content }]
     }));
 
-    return await this.rotator.executeWithRotation(async (apiKey) => {
-      const ai = new GoogleGenAI({ apiKey });
-      const responseStream = await ai.models.generateContentStream({
-        model: this.modelName,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.3
-        }
-      });
+    const modelsToTry = [
+      this.modelName,
+      ...FULL_GEMINI_MODELS_PROGRESSION.filter((m) => m !== this.modelName)
+    ];
+    let lastError: any;
 
-      let fullText = '';
-      let tokensUsed = 0;
+    for (const model of modelsToTry) {
+      try {
+        return await this.rotator.executeWithRotation(async (apiKey) => {
+          const ai = new GoogleGenAI({ apiKey });
+          const responseStream = await ai.models.generateContentStream({
+            model,
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.3
+            }
+          });
 
-      for await (const chunk of responseStream) {
-        const text = chunk.text || '';
-        if (text) {
-          fullText += text;
-          onToken(text);
-        }
-        if (chunk.usageMetadata?.totalTokenCount) {
-          tokensUsed = chunk.usageMetadata.totalTokenCount;
-        }
+          let fullText = '';
+          let tokensUsed = 0;
+
+          for await (const chunk of responseStream) {
+            const text = chunk.text || '';
+            if (text) {
+              fullText += text;
+              onToken(text);
+            }
+            if (chunk.usageMetadata?.totalTokenCount) {
+              tokensUsed = chunk.usageMetadata.totalTokenCount;
+            }
+          }
+
+          return { fullText, tokensUsed };
+        });
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`⚠️ Stream on model "${model}" hit error. Escalating to next model...`);
       }
+    }
 
-      return { fullText, tokensUsed };
-    });
+    throw lastError;
   }
 }

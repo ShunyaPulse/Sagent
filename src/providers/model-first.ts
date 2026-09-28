@@ -1,25 +1,23 @@
 /**
  * Sagent Model-First Dual-Tier Execution Engine
- * (Modeled after SaralGati AI Fallback & Model-First Architecture)
  * 
  * Hierarchy:
  * - Tier 1: Custom Fine-Tuned LoRA on Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct)
- * - Tier 2: Google Gemini AI Studio with 34-Key Pool & Multi-Model Progression
- *          (gemini-2.5-flash -> gemini-2.5-pro -> gemini-1.5-flash -> gemini-1.5-pro)
+ * - Tier 2: Google Gemini AI Studio 34-Key Pool & Full 14-Model Progression:
+ *          [gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite,
+ *           gemini-2.5-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-3.5-flash,
+ *           gemini-3.6-flash, gemini-3-flash, gemini-flash-latest,
+ *           gemma-4-26b, gemma-4-31b,
+ *           gemini-2.5-pro, gemini-3.1-pro]
  */
 
 import { LLMProvider, Message, AgentTool, StepOutput } from '../core/types.js';
 import { CloudflareWorkersAIProvider } from './cloudflare.js';
-import { GeminiProvider } from './gemini.js';
+import { GeminiProvider, FULL_GEMINI_MODELS_PROGRESSION } from './gemini.js';
 import { GeminiKeyRotator } from './key-rotator.js';
 import { env } from '../config/env.js';
 
-export const GEMINI_MODELS_PROGRESSION = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro'
-];
+export { FULL_GEMINI_MODELS_PROGRESSION };
 
 export class ModelFirstProvider implements LLMProvider {
   public name = 'model-first';
@@ -57,14 +55,13 @@ export class ModelFirstProvider implements LLMProvider {
           return cfResult;
         }
       } catch (cfErr: any) {
-        console.warn(`⚠️ [Tier 1: Cloudflare LoRA] Failed: ${cfErr.message}. Escalating to Tier 2 Gemini Pool...`);
+        console.warn(`⚠️ [Tier 1: Cloudflare LoRA] Failed: ${cfErr.message}. Escalating to Tier 2 Gemini 14-Model Matrix...`);
       }
     }
 
     // -------------------------------------------------------------
-    // Tier 2: Gemini Multi-Model & Multi-Key Pool Escalation
+    // Tier 2: Gemini Full 14-Model & 34-Key Matrix Progression
     // -------------------------------------------------------------
-    console.log('⚡ [Tier 2: Gemini Pool] Generating step with key rotator...');
     return await this.geminiProvider.generateStep(messages, tools, systemInstruction);
   }
 
@@ -73,16 +70,14 @@ export class ModelFirstProvider implements LLMProvider {
     systemInstruction: string,
     onToken: (token: string) => void
   ): Promise<{ fullText: string; tokensUsed: number }> {
-    // Tier 1: Cloudflare stream if preferred
     if (this.cloudflareProvider && env.LLM_PROVIDER === 'cloudflare') {
       try {
         return await this.cloudflareProvider.streamFinalAnswer(messages, systemInstruction, onToken);
       } catch (cfErr: any) {
-        console.warn(`⚠️ Cloudflare stream failed: ${cfErr.message}. Falling back to Gemini...`);
+        console.warn(`⚠️ Cloudflare stream failed: ${cfErr.message}. Escalating to Gemini Matrix...`);
       }
     }
 
-    // Tier 2: Gemini stream
     return await this.geminiProvider.streamFinalAnswer(messages, systemInstruction, onToken);
   }
 }
