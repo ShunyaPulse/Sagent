@@ -26,7 +26,12 @@ const envSchema = z.object({
       16,
       "ORIGIN_SECRET must be at least 16 characters for origin shielding",
     ),
-  ENABLE_ORIGIN_SHIELDING: z.coerce.boolean().default(true),
+  ENABLE_ORIGIN_SHIELDING: z
+    .preprocess(
+      (val) => val === true || val === "true" || val === "1",
+      z.boolean(),
+    )
+    .default(false),
 
   // AI Models
   LLM_PROVIDER: z

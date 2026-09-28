@@ -45,19 +45,26 @@ export async function verifyOriginShield(req: FastifyRequest, reply: FastifyRepl
  */
 export async function verifyApiKey(req: FastifyRequest, reply: FastifyReply) {
   const authHeader = req.headers.authorization;
+  const xApiKey = req.headers['x-api-key'] as string | undefined;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token = '';
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (xApiKey) {
+    token = xApiKey.trim();
+  } else {
     reply.status(401).send({
       statusCode: 401,
       error: 'Unauthorized',
-      message: 'Missing or malformed Authorization header. Expected Bearer token.'
+      message: 'Missing API key. Provide Authorization: Bearer <KEY> or x-api-key header.'
     });
     return reply;
   }
 
-  const token = authHeader.slice(7).trim();
+  const matchesAuthSecret = safeEqual(token, env.AUTH_SECRET);
+  const matchesApiSecret = process.env.API_SECRET ? safeEqual(token, process.env.API_SECRET) : false;
 
-  if (!safeEqual(token, env.AUTH_SECRET)) {
+  if (!matchesAuthSecret && !matchesApiSecret) {
     reply.status(401).send({
       statusCode: 401,
       error: 'Unauthorized',
