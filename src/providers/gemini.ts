@@ -1,13 +1,19 @@
-import { GoogleGenAI } from '@google/genai';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import { LLMProvider, Message, AgentTool, StepOutput, ToolCall } from '../core/types.js';
-import { env } from '../config/env.js';
-import { GeminiKeyRotator, SARALGATI_CANDIDATE_MODELS } from './key-rotator.js';
+import { GoogleGenAI } from "@google/genai";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import {
+  LLMProvider,
+  Message,
+  AgentTool,
+  StepOutput,
+  ToolCall,
+} from "../core/types.js";
+import { env } from "../config/env.js";
+import { GeminiKeyRotator, SARALGATI_CANDIDATE_MODELS } from "./key-rotator.js";
 
 export { SARALGATI_CANDIDATE_MODELS };
 
 export class GeminiProvider implements LLMProvider {
-  public name = 'gemini';
+  public name = "gemini";
   private preferredModel: string;
   private rotator: GeminiKeyRotator;
 
@@ -19,18 +25,20 @@ export class GeminiProvider implements LLMProvider {
   async generateStep(
     messages: Message[],
     tools: AgentTool<any>[],
-    systemInstruction: string
+    systemInstruction: string,
   ): Promise<StepOutput> {
     const functionDeclarations = tools.map((t) => {
-      const jsonSchema = zodToJsonSchema(t.parameters, { target: 'openApi3' }) as any;
+      const jsonSchema = zodToJsonSchema(t.parameters, {
+        target: "openApi3",
+      }) as any;
       return {
         name: t.name,
         description: t.description,
         parameters: {
-          type: 'OBJECT',
+          type: "OBJECT",
           properties: jsonSchema.properties || {},
-          required: jsonSchema.required || []
-        }
+          required: jsonSchema.required || [],
+        },
       };
     });
 
@@ -44,8 +52,8 @@ export class GeminiProvider implements LLMProvider {
           parts.push({
             functionCall: {
               name: tc.name,
-              args: tc.arguments
-            }
+              args: tc.arguments,
+            },
           });
         }
       }
@@ -54,21 +62,21 @@ export class GeminiProvider implements LLMProvider {
           parts.push({
             functionResponse: {
               name: tr.name,
-              response: { output: tr.output, isError: tr.isError }
-            }
+              response: { output: tr.output, isError: tr.isError },
+            },
           });
         }
       }
 
       return {
-        role: m.role === 'model' ? 'model' : 'user',
-        parts
+        role: m.role === "model" ? "model" : "user",
+        parts,
       };
     });
 
     // Execute via Model-First Exhaustive Rotation (SaralGati Cloud Self-Learning pattern)
-    const { result, modelUsed, keyIndexUsed } = await this.rotator.executeModelFirst(
-      async (modelName, apiKey) => {
+    const { result, modelUsed, keyIndexUsed } =
+      await this.rotator.executeModelFirst(async (modelName, apiKey) => {
         const ai = new GoogleGenAI({ apiKey });
         const response = await ai.models.generateContent({
           model: modelName,
@@ -76,8 +84,11 @@ export class GeminiProvider implements LLMProvider {
           config: {
             systemInstruction,
             temperature: 0.2,
-            tools: functionDeclarations.length > 0 ? [{ functionDeclarations: functionDeclarations as any }] : undefined
-          }
+            tools:
+              functionDeclarations.length > 0
+                ? [{ functionDeclarations: functionDeclarations as any }]
+                : undefined,
+          },
         });
 
         const toolCalls: ToolCall[] = [];
@@ -87,8 +98,8 @@ export class GeminiProvider implements LLMProvider {
           for (const fc of response.functionCalls) {
             toolCalls.push({
               id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-              name: fc.name || 'unknown_tool',
-              arguments: (fc.args as Record<string, any>) || {}
+              name: fc.name || "unknown_tool",
+              arguments: (fc.args as Record<string, any>) || {},
             });
           }
         }
@@ -101,11 +112,9 @@ export class GeminiProvider implements LLMProvider {
           thought: thoughtText,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           finalAnswer: toolCalls.length === 0 ? thoughtText : undefined,
-          tokensUsed: response.usageMetadata?.totalTokenCount || 0
+          tokensUsed: response.usageMetadata?.totalTokenCount || 0,
         };
-      },
-      this.preferredModel
-    );
+      }, this.preferredModel);
 
     return result;
   }
@@ -113,11 +122,11 @@ export class GeminiProvider implements LLMProvider {
   async streamFinalAnswer(
     messages: Message[],
     systemInstruction: string,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
   ): Promise<{ fullText: string; tokensUsed: number }> {
     const contents = messages.map((m) => ({
-      role: m.role === 'model' ? 'model' : 'user',
-      parts: [{ text: m.content }]
+      role: m.role === "model" ? "model" : "user",
+      parts: [{ text: m.content }],
     }));
 
     const { result } = await this.rotator.executeModelFirst(
@@ -128,15 +137,15 @@ export class GeminiProvider implements LLMProvider {
           contents,
           config: {
             systemInstruction,
-            temperature: 0.3
-          }
+            temperature: 0.3,
+          },
         });
 
-        let fullText = '';
+        let fullText = "";
         let tokensUsed = 0;
 
         for await (const chunk of responseStream) {
-          const text = chunk.text || '';
+          const text = chunk.text || "";
           if (text) {
             fullText += text;
             onToken(text);
@@ -148,7 +157,7 @@ export class GeminiProvider implements LLMProvider {
 
         return { fullText, tokensUsed };
       },
-      this.preferredModel
+      this.preferredModel,
     );
 
     return result;
