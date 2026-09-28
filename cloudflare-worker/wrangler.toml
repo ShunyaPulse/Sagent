@@ -1,0 +1,9 @@
+name = "sagent-edge-ingress"
+main = "worker.js"
+compatibility_date = "2024-04-01"
+
+[vars]
+ENFORCE_TURNSTILE = "false"
+CLOUD_RUN_ORIGIN_URL = "https://sagent-xxxxx-uc.a.run.app"
+ORIGIN_SECRET = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+TURNSTILE_SECRET_KEY = "0x4AAAAAAEzX2qSXKd6IhABllINQL_Zn88M"
