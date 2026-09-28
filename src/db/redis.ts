@@ -23,27 +23,37 @@ if (env.REDIS_URL) {
     });
 
     redisClient.on("connect", () => {
-      console.log("✅ Connected to OCI Redis cluster");
+      if (process.env.DEBUG_REDIS === "true") {
+        console.log("✅ Connected to OCI Redis cluster");
+      }
     });
 
     redisClient.on("error", (err: any) => {
-      console.warn("⚠️ Redis error encountered:", err.message);
+      if (process.env.DEBUG_REDIS === "true") {
+        console.warn("⚠️ Redis error encountered:", err.message);
+      }
     });
 
     redisClient.connect().catch((err: any) => {
-      console.warn(
-        "⚠️ Failed to connect to Redis initially. Operating with in-memory lock fallback:",
-        err.message,
-      );
+      if (process.env.DEBUG_REDIS === "true") {
+        console.warn(
+          "⚠️ Failed to connect to Redis initially. Operating with in-memory lock fallback:",
+          err.message,
+        );
+      }
     });
   } catch (err: any) {
-    console.warn("⚠️ Redis initialization error, using in-memory locks:", err);
+    if (process.env.DEBUG_REDIS === "true") {
+      console.warn("⚠️ Redis initialization error, using in-memory locks:", err);
+    }
     redisClient = null;
   }
 } else {
-  console.log(
-    "ℹ️ No REDIS_URL provided. Operating with in-memory mutex locks.",
-  );
+  if (process.env.DEBUG_REDIS === "true") {
+    console.log(
+      "ℹ️ No REDIS_URL provided. Operating with in-memory mutex locks.",
+    );
+  }
 }
 
 export async function acquireSessionLock(

@@ -5,7 +5,10 @@ import { env } from "../src/config/env.js";
 
 // Suppress pg-connection-string security warning
 process.on("warning", (warning) => {
-  if (warning.name === "SecurityWarning" || warning.message.includes("SSL modes")) {
+  if (
+    warning.name === "SecurityWarning" ||
+    warning.message.includes("SSL modes")
+  ) {
     return;
   }
   console.warn(warning);

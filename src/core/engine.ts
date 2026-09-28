@@ -192,12 +192,27 @@ export class AgentEngine {
         }`;
       }
 
-      const finalAnswerStr =
+      let finalAnswerStr =
         typeof finalAnswer === "string"
           ? finalAnswer
           : typeof (finalAnswer as any)?.finalAnswer === "string"
             ? (finalAnswer as any).finalAnswer
             : JSON.stringify(finalAnswer, null, 2);
+
+      // Defensively unpack any raw JSON strings containing finalAnswer or thoughts
+      if (typeof finalAnswerStr === "string" && finalAnswerStr.trim().startsWith("{")) {
+        try {
+          const parsed = JSON.parse(finalAnswerStr.trim());
+          if (parsed.finalAnswer && typeof parsed.finalAnswer === "string") {
+            finalAnswerStr = parsed.finalAnswer;
+          }
+        } catch {
+          const match = finalAnswerStr.match(/"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/);
+          if (match && match[1]) {
+            finalAnswerStr = match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+          }
+        }
+      }
 
       // Stream the answer tokens to the client
       const chunks = finalAnswerStr.match(/.{1,12}/g) || [finalAnswerStr];

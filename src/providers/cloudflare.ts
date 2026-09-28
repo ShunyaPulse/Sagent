@@ -1,27 +1,42 @@
-import { LLMProvider, Message, AgentTool, StepOutput, ToolCall } from '../core/types.js';
-import { env } from '../config/env.js';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import {
+  LLMProvider,
+  Message,
+  AgentTool,
+  StepOutput,
+  ToolCall,
+} from "../core/types.js";
+import { env } from "../config/env.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 export class CloudflareWorkersAIProvider implements LLMProvider {
-  public name = 'cloudflare';
+  public name = "cloudflare";
   private accountId: string;
   private apiToken: string;
   private modelName: string;
+  private loraName: string;
 
-  constructor(accountId?: string, apiToken?: string, modelName?: string) {
-    this.accountId = accountId || env.CLOUDFLARE_ACCOUNT_ID || '';
-    this.apiToken = apiToken || env.CLOUDFLARE_API_TOKEN || '';
+  constructor(
+    accountId?: string,
+    apiToken?: string,
+    modelName?: string,
+    loraName?: string,
+  ) {
+    this.accountId = accountId || env.CLOUDFLARE_ACCOUNT_ID || "";
+    this.apiToken = apiToken || env.CLOUDFLARE_API_TOKEN || "";
     this.modelName = modelName || env.CLOUDFLARE_AI_MODEL;
+    this.loraName = loraName || env.CLOUDFLARE_LORA_NAME || "";
 
     if (!this.accountId || !this.apiToken) {
-      console.warn('⚠️ CloudflareWorkersAIProvider initialized without CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN');
+      console.warn(
+        "⚠️ CloudflareWorkersAIProvider initialized without CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN",
+      );
     }
   }
 
   async generateStep(
     messages: Message[],
     tools: AgentTool[],
-    systemInstruction: string
+    systemInstruction: string,
   ): Promise<StepOutput> {
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai/run/${this.modelName}`;
 
@@ -29,7 +44,7 @@ export class CloudflareWorkersAIProvider implements LLMProvider {
     const toolSpecs = tools.map((t) => ({
       name: t.name,
       description: t.description,
-      parameters: zodToJsonSchema(t.parameters)
+      parameters: zodToJsonSchema(t.parameters),
     }));
 
     const enrichedSystemPrompt = `
@@ -55,47 +70,56 @@ You must respond in strict JSON format matching ONE of these two schemas:
 
     // Map conversation messages to prompt
     const promptMessages = [
-      { role: 'system', content: enrichedSystemPrompt },
+      { role: "system", content: enrichedSystemPrompt },
       ...messages.map((m) => {
         let text = m.content;
         if (m.toolResults && m.toolResults.length > 0) {
           text += `\nTool Observations:\n${JSON.stringify(m.toolResults)}`;
         }
         return {
-          role: m.role === 'model' ? 'assistant' : 'user',
-          content: text
+          role: m.role === "model" ? "assistant" : "user",
+          content: text,
         };
-      })
+      }),
     ];
 
     const res = await fetch(endpoint, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         messages: promptMessages,
         max_tokens: 1024,
-        temperature: 0.1
-      })
+        temperature: 0.1,
+        ...(this.loraName ? { lora: this.loraName } : {}),
+      }),
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Cloudflare Workers AI API error (${res.status}): ${errText}`);
+      throw new Error(
+        `Cloudflare Workers AI API error (${res.status}): ${errText}`,
+      );
     }
 
     const data: any = await res.json();
-    const rawResult = data.result?.response ?? data.result?.choices?.[0]?.message?.content ?? '';
+    const rawResult =
+      data.result?.response ??
+      data.result?.choices?.[0]?.message?.content ??
+      "";
 
     let parsed: any = null;
 
-    if (typeof rawResult === 'object' && rawResult !== null) {
+    if (typeof rawResult === "object" && rawResult !== null) {
       parsed = rawResult;
-    } else if (typeof rawResult === 'string') {
+    } else if (typeof rawResult === "string") {
       try {
-        const cleanJson = rawResult.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+        const cleanJson = rawResult
+          .replace(/```json\s*/gi, "")
+          .replace(/```\s*$/gi, "")
+          .trim();
         parsed = JSON.parse(cleanJson);
       } catch {
         // Regex fallback if JSON.parse fails on unescaped newlines or syntax quirks
@@ -114,73 +138,84 @@ You must respond in strict JSON format matching ONE of these two schemas:
           parsed = {
             tool: toolMatch[1],
             arguments: args,
-            thought: thoughtMatch ? thoughtMatch[1] : undefined
+            thought: thoughtMatch ? thoughtMatch[1] : undefined,
           };
         } else if (answerMatch) {
           parsed = {
             finalAnswer: answerMatch[1],
-            thought: thoughtMatch ? thoughtMatch[1] : undefined
+            thought: thoughtMatch ? thoughtMatch[1] : undefined,
           };
         }
       }
     }
 
-    if (parsed && typeof parsed === 'object') {
+    if (parsed && typeof parsed === "object") {
       if (parsed.tool) {
         const toolCalls: ToolCall[] = [
           {
             id: `cf_call_${Date.now()}`,
             name: parsed.tool,
-            arguments: parsed.arguments || {}
-          }
+            arguments: parsed.arguments || {},
+          },
         ];
         return {
           thought: parsed.thought,
-          toolCalls
+          toolCalls,
         };
       }
 
       if (parsed.finalAnswer) {
         return {
           thought: parsed.thought,
-          finalAnswer: parsed.finalAnswer
+          finalAnswer: parsed.finalAnswer,
         };
       }
     }
 
     // Fallback if model gave raw text without JSON wrapping
-    const fallbackAnswer = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult);
+    let fallbackAnswer =
+      typeof rawResult === "string" ? rawResult : JSON.stringify(rawResult);
+
+    // If fallback string contains a json with finalAnswer, extract it
+    if (fallbackAnswer.includes('"finalAnswer"')) {
+      const match = fallbackAnswer.match(/"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/);
+      if (match && match[1]) {
+        fallbackAnswer = match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+      }
+    }
+
     return {
-      finalAnswer: fallbackAnswer
+      finalAnswer: fallbackAnswer,
     };
   }
 
   async streamFinalAnswer(
     messages: Message[],
     systemInstruction: string,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
   ): Promise<{ fullText: string; tokensUsed: number }> {
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai/run/${this.modelName}`;
 
     const promptMessages = [
-      { role: 'system', content: systemInstruction },
+      { role: "system", content: systemInstruction },
       ...messages.map((m) => ({
-        role: m.role === 'model' ? 'assistant' : 'user',
-        content: m.content
-      }))
+        role: m.role === "model" ? "assistant" : "user",
+        content: m.content,
+      })),
     ];
 
     const res = await fetch(endpoint, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         messages: promptMessages,
         max_tokens: 2048,
-        stream: true
-      })
+        stream: true,
+        ...(this.loraName ? { lora: this.loraName } : {}),
+      }),
     });
 
     if (!res.ok || !res.body) {
@@ -191,20 +226,20 @@ You must respond in strict JSON format matching ONE of these two schemas:
     // Read SSE stream
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let fullText = '';
+    let fullText = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
+      const lines = chunk.split("\n");
 
       for (const line of lines) {
-        if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+        if (line.startsWith("data: ") && !line.includes("[DONE]")) {
           try {
             const parsed = JSON.parse(line.slice(6));
-            const token = parsed.response || '';
+            const token = parsed.response || "";
             if (token) {
               fullText += token;
               onToken(token);
