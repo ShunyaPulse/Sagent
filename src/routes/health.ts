@@ -1,43 +1,43 @@
-import { FastifyInstance } from 'fastify';
-import { checkDbHealth } from '../db/postgres.js';
-import { checkRedisHealth } from '../db/redis.js';
+import { FastifyInstance } from "fastify";
+import { checkDbHealth } from "../db/postgres.js";
+import { checkRedisHealth } from "../db/redis.js";
 
 export async function healthRoutes(fastify: FastifyInstance) {
   // Liveness probe
-  fastify.get('/healthz', async (_req, reply) => {
+  fastify.get("/healthz", async (_req, reply) => {
     return reply.status(200).send({
-      status: 'ok',
-      service: 'sagent',
-      timestamp: new Date().toISOString()
+      status: "ok",
+      service: "sagent",
+      timestamp: new Date().toISOString(),
     });
   });
 
   // Readiness probe
-  fastify.get('/readyz', async (_req, reply) => {
+  fastify.get("/readyz", async (_req, reply) => {
     const [dbHealthy, redisHealthy] = await Promise.all([
       checkDbHealth(),
-      checkRedisHealth()
+      checkRedisHealth(),
     ]);
 
     const isReady = dbHealthy;
 
     return reply.status(isReady ? 200 : 503).send({
-      status: isReady ? 'ready' : 'degraded',
+      status: isReady ? "ready" : "degraded",
       dependencies: {
-        neonPostgres: dbHealthy ? 'connected' : 'unreachable',
-        redis: redisHealthy ? 'connected' : 'fallback_mode'
+        neonPostgres: dbHealthy ? "connected" : "unreachable",
+        redis: redisHealthy ? "connected" : "fallback_mode",
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   });
 
   // Interactive Web Playground on GET / and GET /playground
-  fastify.get('/', async (_req, reply) => {
-    reply.type('text/html').send(PLAYGROUND_HTML);
+  fastify.get("/", async (_req, reply) => {
+    reply.type("text/html").send(PLAYGROUND_HTML);
   });
 
-  fastify.get('/playground', async (_req, reply) => {
-    reply.type('text/html').send(PLAYGROUND_HTML);
+  fastify.get("/playground", async (_req, reply) => {
+    reply.type("text/html").send(PLAYGROUND_HTML);
   });
 }
 

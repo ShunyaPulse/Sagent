@@ -1,45 +1,34 @@
-import { GoogleGenAI } from "@google/genai";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import {
-  LLMProvider,
-  Message,
-  AgentTool,
-  StepOutput,
-  ToolCall,
-} from "../core/types.js";
-import { env } from "../config/env.js";
+import { GoogleGenAI } from '@google/genai';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { LLMProvider, Message, AgentTool, StepOutput, ToolCall } from '../core/types.js';
+import { env } from '../config/env.js';
+import { GeminiKeyRotator } from './key-rotator.js';
 
 export class GeminiProvider implements LLMProvider {
-  public name = "gemini";
-  private ai: GoogleGenAI;
+  public name = 'gemini';
   private modelName: string;
+  private rotator: GeminiKeyRotator;
 
   constructor(apiKey?: string, modelName?: string) {
-    const key = apiKey || env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("GEMINI_API_KEY is required for GeminiProvider");
-    }
-    this.ai = new GoogleGenAI({ apiKey: key });
     this.modelName = modelName || env.GEMINI_MODEL;
+    this.rotator = GeminiKeyRotator.getInstance();
   }
 
   async generateStep(
     messages: Message[],
     tools: AgentTool<any>[],
-    systemInstruction: string,
+    systemInstruction: string
   ): Promise<StepOutput> {
     const functionDeclarations = tools.map((t) => {
-      const jsonSchema = zodToJsonSchema(t.parameters, {
-        target: "openApi3",
-      }) as any;
+      const jsonSchema = zodToJsonSchema(t.parameters, { target: 'openApi3' }) as any;
       return {
         name: t.name,
         description: t.description,
         parameters: {
-          type: "OBJECT",
+          type: 'OBJECT',
           properties: jsonSchema.properties || {},
-          required: jsonSchema.required || [],
-        },
+          required: jsonSchema.required || []
+        }
       };
     });
 
@@ -53,8 +42,8 @@ export class GeminiProvider implements LLMProvider {
           parts.push({
             functionCall: {
               name: tc.name,
-              args: tc.arguments,
-            },
+              args: tc.arguments
+            }
           });
         }
       }
@@ -63,89 +52,93 @@ export class GeminiProvider implements LLMProvider {
           parts.push({
             functionResponse: {
               name: tr.name,
-              response: { output: tr.output, isError: tr.isError },
-            },
+              response: { output: tr.output, isError: tr.isError }
+            }
           });
         }
       }
 
       return {
-        role: m.role === "model" ? "model" : "user",
-        parts,
+        role: m.role === 'model' ? 'model' : 'user',
+        parts
       };
     });
 
-    const response = await this.ai.models.generateContent({
-      model: this.modelName,
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.2,
-        tools:
-          functionDeclarations.length > 0
-            ? [{ functionDeclarations: functionDeclarations as any }]
-            : undefined,
-      },
-    });
+    // Execute with automatic key rotation across all pooled API keys
+    return await this.rotator.executeWithRotation(async (apiKey) => {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: this.modelName,
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.2,
+          tools: functionDeclarations.length > 0 ? [{ functionDeclarations: functionDeclarations as any }] : undefined
+        }
+      });
 
-    const toolCalls: ToolCall[] = [];
-    let thoughtText: string | undefined;
+      const toolCalls: ToolCall[] = [];
+      let thoughtText: string | undefined;
 
-    if (response.functionCalls && response.functionCalls.length > 0) {
-      for (const fc of response.functionCalls) {
-        toolCalls.push({
-          id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          name: fc.name || "unknown_tool",
-          arguments: (fc.args as Record<string, any>) || {},
-        });
+      if (response.functionCalls && response.functionCalls.length > 0) {
+        for (const fc of response.functionCalls) {
+          toolCalls.push({
+            id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            name: fc.name || 'unknown_tool',
+            arguments: (fc.args as Record<string, any>) || {}
+          });
+        }
       }
-    }
 
-    if (response.text) {
-      thoughtText = response.text;
-    }
+      if (response.text) {
+        thoughtText = response.text;
+      }
 
-    return {
-      thought: thoughtText,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      finalAnswer: toolCalls.length === 0 ? thoughtText : undefined,
-      tokensUsed: response.usageMetadata?.totalTokenCount || 0,
-    };
+      return {
+        thought: thoughtText,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finalAnswer: toolCalls.length === 0 ? thoughtText : undefined,
+        tokensUsed: response.usageMetadata?.totalTokenCount || 0
+      };
+    });
   }
 
   async streamFinalAnswer(
     messages: Message[],
     systemInstruction: string,
-    onToken: (token: string) => void,
+    onToken: (token: string) => void
   ): Promise<{ fullText: string; tokensUsed: number }> {
     const contents = messages.map((m) => ({
-      role: m.role === "model" ? "model" : "user",
-      parts: [{ text: m.content }],
+      role: m.role === 'model' ? 'model' : 'user',
+      parts: [{ text: m.content }]
     }));
 
-    const responseStream = await this.ai.models.generateContentStream({
-      model: this.modelName,
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 0.3,
-      },
+    return await this.rotator.executeWithRotation(async (apiKey) => {
+      const ai = new GoogleGenAI({ apiKey });
+      const responseStream = await ai.models.generateContentStream({
+        model: this.modelName,
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.3
+        }
+      });
+
+      let fullText = '';
+      let tokensUsed = 0;
+
+      for await (const chunk of responseStream) {
+        const text = chunk.text || '';
+        if (text) {
+          fullText += text;
+          onToken(text);
+        }
+        if (chunk.usageMetadata?.totalTokenCount) {
+          tokensUsed = chunk.usageMetadata.totalTokenCount;
+        }
+      }
+
+      return { fullText, tokensUsed };
     });
-
-    let fullText = "";
-    let tokensUsed = 0;
-
-    for await (const chunk of responseStream) {
-      const text = chunk.text || "";
-      if (text) {
-        fullText += text;
-        onToken(text);
-      }
-      if (chunk.usageMetadata?.totalTokenCount) {
-        tokensUsed = chunk.usageMetadata.totalTokenCount;
-      }
-    }
-
-    return { fullText, tokensUsed };
   }
 }
