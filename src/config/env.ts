@@ -18,7 +18,7 @@ const envSchema = z.object({
   ENABLE_ORIGIN_SHIELDING: z.coerce.boolean().default(true),
   
   // AI Models
-  LLM_PROVIDER: z.enum(['gemini', 'cloudflare']).default('gemini'),
+  LLM_PROVIDER: z.enum(['gemini', 'cloudflare', 'model-first']).default('model-first'),
   EMBEDDING_PROVIDER: z.enum(['gemini', 'cloudflare']).default('gemini'),
   
   GEMINI_API_KEY: z.string().optional(),
@@ -28,6 +28,7 @@ const envSchema = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
   CLOUDFLARE_API_TOKEN: z.string().optional(),
   CLOUDFLARE_AI_MODEL: z.string().default('@cf/meta/llama-3.1-8b-instruct'),
+  CLOUDFLARE_LORA_NAME: z.string().optional(),
   CLOUDFLARE_EMBEDDING_MODEL: z.string().default('@cf/baai/bge-base-en-v1.5'),
   
   // ReAct Agent Limits

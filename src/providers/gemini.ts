@@ -4,6 +4,13 @@ import { LLMProvider, Message, AgentTool, StepOutput, ToolCall } from '../core/t
 import { env } from '../config/env.js';
 import { GeminiKeyRotator } from './key-rotator.js';
 
+const MODEL_PROGRESSION = [
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
+];
+
 export class GeminiProvider implements LLMProvider {
   public name = 'gemini';
   private modelName: string;
@@ -64,43 +71,55 @@ export class GeminiProvider implements LLMProvider {
       };
     });
 
-    // Execute with automatic key rotation across all pooled API keys
-    return await this.rotator.executeWithRotation(async (apiKey) => {
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: this.modelName,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.2,
-          tools: functionDeclarations.length > 0 ? [{ functionDeclarations: functionDeclarations as any }] : undefined
-        }
-      });
+    // Multi-Model Escalation with 34-key rotation pool
+    const modelsToTry = [this.modelName, ...MODEL_PROGRESSION.filter((m) => m !== this.modelName)];
+    let lastError: any;
 
-      const toolCalls: ToolCall[] = [];
-      let thoughtText: string | undefined;
-
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        for (const fc of response.functionCalls) {
-          toolCalls.push({
-            id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            name: fc.name || 'unknown_tool',
-            arguments: (fc.args as Record<string, any>) || {}
+    for (const model of modelsToTry) {
+      try {
+        return await this.rotator.executeWithRotation(async (apiKey) => {
+          const ai = new GoogleGenAI({ apiKey });
+          const response = await ai.models.generateContent({
+            model,
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.2,
+              tools: functionDeclarations.length > 0 ? [{ functionDeclarations: functionDeclarations as any }] : undefined
+            }
           });
-        }
-      }
 
-      if (response.text) {
-        thoughtText = response.text;
-      }
+          const toolCalls: ToolCall[] = [];
+          let thoughtText: string | undefined;
 
-      return {
-        thought: thoughtText,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        finalAnswer: toolCalls.length === 0 ? thoughtText : undefined,
-        tokensUsed: response.usageMetadata?.totalTokenCount || 0
-      };
-    });
+          if (response.functionCalls && response.functionCalls.length > 0) {
+            for (const fc of response.functionCalls) {
+              toolCalls.push({
+                id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                name: fc.name || 'unknown_tool',
+                arguments: (fc.args as Record<string, any>) || {}
+              });
+            }
+          }
+
+          if (response.text) {
+            thoughtText = response.text;
+          }
+
+          return {
+            thought: thoughtText,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            finalAnswer: toolCalls.length === 0 ? thoughtText : undefined,
+            tokensUsed: response.usageMetadata?.totalTokenCount || 0
+          };
+        });
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`⚠️ Model "${model}" failed or exhausted across keys. Escalating to next model in progression...`);
+      }
+    }
+
+    throw lastError;
   }
 
   async streamFinalAnswer(
