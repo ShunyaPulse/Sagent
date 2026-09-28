@@ -12,25 +12,24 @@
 import { env } from "../config/env.js";
 
 export const SARALGATI_CANDIDATE_MODELS = [
-  "gemini-3.8-flash",       // Latest stable, highest quality  (5 RPM / 20 RPD)
-  "gemini-3.7-flash",       // Previous gen, highly capable    (5 RPM / 20 RPD)
-  "gemini-3.6-flash",       // Solid fast fallback             (5 RPM / 20 RPD)
-  "gemini-3.5-flash",       // Widely available               (5 RPM / 20 RPD)
+  "gemini-3.8-flash", // Latest stable, highest quality  (5 RPM / 20 RPD)
+  "gemini-3.7-flash", // Previous gen, highly capable    (5 RPM / 20 RPD)
+  "gemini-3.6-flash", // Solid fast fallback             (5 RPM / 20 RPD)
+  "gemini-3.5-flash", // Widely available               (5 RPM / 20 RPD)
   "gemini-3-flash-preview", // Gemini 3 Flash Preview          (5 RPM / 20 RPD)
-  "gemini-2.5-flash",       // Stable Gemini 2.5 Flash         (5 RPM / 20 RPD)
-  "gemini-3.5-flash-lite",  // High-throughput lite            (15 RPM / 500 RPD)
-  "gemini-3.1-flash-lite",  // High-throughput lite            (15 RPM / 500 RPD)
-  "gemini-2.5-flash-lite",  // Ultra-fast 2.5 lite             (10 RPM / 20 RPD)
-  "gemma-4-26b",            // Open weights 26B model          (30 RPM / 14,400 RPD)
-  "gemma-4-31b",            // Open weights 31B model          (30 RPM / 14,400 RPD)
-  "gemini-flash-latest",    // Dynamic alias fallback
+  "gemini-2.5-flash", // Stable Gemini 2.5 Flash         (5 RPM / 20 RPD)
+  "gemini-3.5-flash-lite", // High-throughput lite            (15 RPM / 500 RPD)
+  "gemini-3.1-flash-lite", // High-throughput lite            (15 RPM / 500 RPD)
+  "gemini-2.5-flash-lite", // Ultra-fast 2.5 lite             (10 RPM / 20 RPD)
+  "gemma-4-26b", // Open weights 26B model          (30 RPM / 14,400 RPD)
+  "gemma-4-31b", // Open weights 31B model          (30 RPM / 14,400 RPD)
+  "gemini-flash-latest", // Dynamic alias fallback
 ];
 
 export class GeminiKeyRotator {
   private static instance: GeminiKeyRotator;
   private keys: string[] = [];
   private currentKeyIndex = 0;
-  private blacklistedModels: Map<string, number> = new Map(); // model -> unblacklist timestamp
 
   private constructor() {
     const rawKeys = env.GEMINI_API_KEY || "";
@@ -61,20 +60,6 @@ export class GeminiKeyRotator {
 
   public getKeyCount(): number {
     return this.keys.length;
-  }
-
-  private isModelBlacklisted(model: string): boolean {
-    const expiresAt = this.blacklistedModels.get(model);
-    if (!expiresAt) return false;
-    if (Date.now() > expiresAt) {
-      this.blacklistedModels.delete(model);
-      return false;
-    }
-    return true;
-  }
-
-  private blacklistModel(model: string, durationMs = 60000) {
-    this.blacklistedModels.set(model, Date.now() + durationMs);
   }
 
   public async executeWithRotation<T>(
@@ -109,7 +94,7 @@ export class GeminiKeyRotator {
 
   /**
    * Model-First Exhaustive Execution:
-   * Tries ALL keys on Model 1, then ALL keys on Model 2, etc.
+   * Tries ALL keys on Model 1, then ALL keys on Model 2, etc. (No blacklisting)
    */
   public async executeModelFirst<T>(
     operation: (modelName: string, apiKey: string) => Promise<T>,
@@ -129,10 +114,6 @@ export class GeminiKeyRotator {
     let lastError: any;
 
     for (const modelName of candidateModels) {
-      if (this.isModelBlacklisted(modelName)) {
-        continue; // Skip 503 high-demand models
-      }
-
       let modelExhausted = true;
 
       for (let i = 0; i < this.keys.length; i++) {
@@ -151,25 +132,7 @@ export class GeminiKeyRotator {
           const status =
             err.status || (err.response ? err.response.status : null);
 
-          // 503 / 500 High Demand: Blacklist model and fast-switch to next model
-          if (
-            status === 503 ||
-            status === 500 ||
-            status === 502 ||
-            status === 504 ||
-            msg.includes("503") ||
-            msg.includes("high demand") ||
-            msg.includes("overloaded")
-          ) {
-            this.blacklistModel(modelName);
-            console.warn(
-              `  ⚡ ${modelName} is experiencing high demand (${status || 503}). Blacklisting for 60s, fast-switching to next candidate model...`,
-            );
-            modelExhausted = false;
-            break; // Break key loop, jump to next model immediately!
-          }
-
-          // 429 Rate Limit on this specific key: Try next key on SAME model
+          // 429 Rate Limit / Quota Exhaustion: Try next key on SAME model
           if (
             status === 429 ||
             msg.includes("429") ||
@@ -182,13 +145,29 @@ export class GeminiKeyRotator {
             continue;
           }
 
-          // 404 Model Not Found
+          // 503 / 500 / Overloaded / High Demand: Try next key without blacklisting
+          if (
+            status === 503 ||
+            status === 500 ||
+            status === 502 ||
+            status === 504 ||
+            msg.includes("503") ||
+            msg.includes("high demand") ||
+            msg.includes("overloaded")
+          ) {
+            console.log(
+              `  ⚡ Key [${keyIdx + 1}/${this.keys.length}] hit temporary server load on ${modelName}, trying next key...`,
+            );
+            continue;
+          }
+
+          // 404 Model Not Found on this endpoint: jump to next model immediately
           if (
             status === 404 ||
             msg.includes("404") ||
             msg.includes("not found")
           ) {
-            this.blacklistModel(modelName, 300000); // 5 min
+            modelExhausted = false;
             break;
           }
 
