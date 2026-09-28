@@ -1,21 +1,21 @@
 /**
  * Sagent Model-First Dual-Tier Execution Engine
+ * (Modeled directly after SaralGati cloud_self_learning.py and aiFallback.ts)
  * 
  * Hierarchy:
  * - Tier 1: Custom Fine-Tuned LoRA on Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct)
- * - Tier 2: Google Gemini AI Studio 34-Key Pool & Active Non-Zero Models Progression:
- *          [gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite,
- *           gemini-3.7-flash, gemini-3.8-flash, gemini-3.5-flash, gemini-3.6-flash,
- *           gemini-3-flash, gemini-2.5-flash, gemma-4-26b, gemma-4-31b]
+ * - Tier 2: Google Gemini AI Studio 34-Key Pool & Model-First Progression:
+ *          [gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> gemini-3.5-flash ->
+ *           gemini-3-flash-preview -> gemini-3.5-flash-lite -> gemini-3.1-flash-lite]
  */
 
 import { LLMProvider, Message, AgentTool, StepOutput } from '../core/types.js';
 import { CloudflareWorkersAIProvider } from './cloudflare.js';
-import { GeminiProvider, ACTIVE_GEMINI_MODELS_PROGRESSION } from './gemini.js';
+import { GeminiProvider, SARALGATI_CANDIDATE_MODELS } from './gemini.js';
 import { GeminiKeyRotator } from './key-rotator.js';
 import { env } from '../config/env.js';
 
-export { ACTIVE_GEMINI_MODELS_PROGRESSION };
+export { SARALGATI_CANDIDATE_MODELS };
 
 export class ModelFirstProvider implements LLMProvider {
   public name = 'model-first';
@@ -53,12 +53,12 @@ export class ModelFirstProvider implements LLMProvider {
           return cfResult;
         }
       } catch (cfErr: any) {
-        console.warn(`⚠️ [Tier 1: Cloudflare LoRA] Failed: ${cfErr.message}. Escalating to Tier 2 Active Gemini Pool...`);
+        console.warn(`⚠️ [Tier 1: Cloudflare LoRA] Failed: ${cfErr.message}. Escalating to Tier 2 Gemini Candidates...`);
       }
     }
 
     // -------------------------------------------------------------
-    // Tier 2: Gemini Active Models & 34-Key Matrix Progression
+    // Tier 2: Gemini Model-First Candidates & 34-Key Matrix Progression
     // -------------------------------------------------------------
     return await this.geminiProvider.generateStep(messages, tools, systemInstruction);
   }
@@ -72,7 +72,7 @@ export class ModelFirstProvider implements LLMProvider {
       try {
         return await this.cloudflareProvider.streamFinalAnswer(messages, systemInstruction, onToken);
       } catch (cfErr: any) {
-        console.warn(`⚠️ Cloudflare stream failed: ${cfErr.message}. Escalating to Gemini Active Matrix...`);
+        console.warn(`⚠️ Cloudflare stream failed: ${cfErr.message}. Escalating to Gemini Model-First...`);
       }
     }
 
