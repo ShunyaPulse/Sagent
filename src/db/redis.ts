@@ -44,7 +44,10 @@ if (env.REDIS_URL) {
     });
   } catch (err: any) {
     if (process.env.DEBUG_REDIS === "true") {
-      console.warn("⚠️ Redis initialization error, using in-memory locks:", err);
+      console.warn(
+        "⚠️ Redis initialization error, using in-memory locks:",
+        err,
+      );
     }
     redisClient = null;
   }

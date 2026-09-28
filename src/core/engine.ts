@@ -27,9 +27,7 @@ export class AgentEngine {
     this.registry = registry || new ToolRegistry();
   }
 
-  async run(
-    options: ExecuteOptions,
-  ): Promise<{
+  async run(options: ExecuteOptions): Promise<{
     finalAnswer: string;
     totalTokens: number;
     stepsExecuted: number;
@@ -200,16 +198,23 @@ export class AgentEngine {
             : JSON.stringify(finalAnswer, null, 2);
 
       // Defensively unpack any raw JSON strings containing finalAnswer or thoughts
-      if (typeof finalAnswerStr === "string" && finalAnswerStr.trim().startsWith("{")) {
+      if (
+        typeof finalAnswerStr === "string" &&
+        finalAnswerStr.trim().startsWith("{")
+      ) {
         try {
           const parsed = JSON.parse(finalAnswerStr.trim());
           if (parsed.finalAnswer && typeof parsed.finalAnswer === "string") {
             finalAnswerStr = parsed.finalAnswer;
           }
         } catch {
-          const match = finalAnswerStr.match(/"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/);
+          const match = finalAnswerStr.match(
+            /"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/,
+          );
           if (match && match[1]) {
-            finalAnswerStr = match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+            finalAnswerStr = match[1]
+              .replace(/\\n/g, "\n")
+              .replace(/\\"/g, '"');
           }
         }
       }

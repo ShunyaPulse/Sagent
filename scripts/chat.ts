@@ -18,7 +18,7 @@ async function main() {
   console.log(`
 ======================================================================
 🤖 Sagent Interactive Terminal CLI
-🧠 Active LLM: ${env.LLM_PROVIDER.toUpperCase()} (${env.GEMINI_MODEL})
+🧠 Model Architecture: MODEL-FIRST (Tier 1: LoRA ${env.CLOUDFLARE_LORA_NAME} ➔ Tier 2: Gemini 34-Key Pool)
 🗄️ Neon pgvector: Connected
 Type your prompt below. Type 'exit' or 'quit' to end session.
 ======================================================================

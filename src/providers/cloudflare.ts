@@ -124,7 +124,9 @@ You must respond in strict JSON format matching ONE of these two schemas:
       } catch {
         // Regex fallback if JSON.parse fails on unescaped newlines or syntax quirks
         const toolMatch = rawResult.match(/"tool"\s*:\s*"([^"]+)"/);
-        const answerMatch = rawResult.match(/"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/);
+        const answerMatch = rawResult.match(
+          /"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/,
+        );
         const thoughtMatch = rawResult.match(/"thought"\s*:\s*"([\s\S]*?)"/);
 
         if (toolMatch) {
@@ -178,7 +180,9 @@ You must respond in strict JSON format matching ONE of these two schemas:
 
     // If fallback string contains a json with finalAnswer, extract it
     if (fallbackAnswer.includes('"finalAnswer"')) {
-      const match = fallbackAnswer.match(/"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/);
+      const match = fallbackAnswer.match(
+        /"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/,
+      );
       if (match && match[1]) {
         fallbackAnswer = match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
       }
