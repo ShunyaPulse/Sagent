@@ -19,10 +19,9 @@ export class GeminiProvider implements LLMProvider {
 
   async generateStep(
     messages: Message[],
-    tools: AgentTool[],
+    tools: AgentTool<any>[],
     systemInstruction: string
   ): Promise<StepOutput> {
-    // Convert AgentTools to Gemini function declarations
     const functionDeclarations = tools.map((t) => {
       const jsonSchema = zodToJsonSchema(t.parameters, { target: 'openApi3' }) as any;
       return {
@@ -36,7 +35,6 @@ export class GeminiProvider implements LLMProvider {
       };
     });
 
-    // Format messages for Gemini SDK contents
     const contents = messages.map((m) => {
       const parts: any[] = [];
       if (m.content) {
@@ -74,7 +72,7 @@ export class GeminiProvider implements LLMProvider {
       contents,
       config: {
         systemInstruction,
-        temperature: 0.2, // Low temperature for deterministic agent actions
+        temperature: 0.2,
         tools: functionDeclarations.length > 0 ? [{ functionDeclarations: functionDeclarations as any }] : undefined
       }
     });
@@ -86,7 +84,7 @@ export class GeminiProvider implements LLMProvider {
       for (const fc of response.functionCalls) {
         toolCalls.push({
           id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          name: fc.name,
+          name: fc.name || 'unknown_tool',
           arguments: (fc.args as Record<string, any>) || {}
         });
       }

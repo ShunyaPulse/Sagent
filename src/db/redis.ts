@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import crypto from 'crypto';
 import { env } from '../config/env.js';
 
@@ -11,7 +11,7 @@ if (env.REDIS_URL) {
       maxRetriesPerRequest: 2,
       connectTimeout: 5000,
       lazyConnect: true,
-      retryStrategy(times) {
+      retryStrategy(times: number) {
         if (times > 3) {
           console.warn('⚠️ OCI Redis unreachable after 3 retries, falling back to local memory locks.');
           return null;
@@ -24,14 +24,14 @@ if (env.REDIS_URL) {
       console.log('✅ Connected to OCI Redis cluster');
     });
 
-    redisClient.on('error', (err) => {
+    redisClient.on('error', (err: any) => {
       console.warn('⚠️ Redis error encountered:', err.message);
     });
 
-    redisClient.connect().catch((err) => {
+    redisClient.connect().catch((err: any) => {
       console.warn('⚠️ Failed to connect to Redis initially. Operating with in-memory lock fallback:', err.message);
     });
-  } catch (err) {
+  } catch (err: any) {
     console.warn('⚠️ Redis initialization error, using in-memory locks:', err);
     redisClient = null;
   }

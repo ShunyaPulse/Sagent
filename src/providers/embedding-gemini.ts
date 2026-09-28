@@ -21,10 +21,12 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
       contents: text
     });
 
-    if (!res.embedding?.values) {
+    const values = (res as any).embedding?.values || res.embeddings?.[0]?.values;
+
+    if (!values) {
       throw new Error('No embedding vector returned by Gemini text-embedding-004');
     }
 
-    return res.embedding.values;
+    return values;
   }
 }

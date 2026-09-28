@@ -38,11 +38,11 @@ export type AgentStreamEvent =
   | { type: 'done'; sessionId: string; totalTokens: number; latencyMs: number }
   | { type: 'error'; message: string };
 
-export interface AgentTool<TParams extends z.ZodTypeAny = z.ZodTypeAny> {
+export interface AgentTool<TParams extends z.ZodTypeAny = any> {
   name: string;
   description: string;
   parameters: TParams;
-  execute: (args: z.infer<TParams>, context: AgentContext) => Promise<any>;
+  execute: (args: any, context: AgentContext) => Promise<any>;
 }
 
 export interface StepOutput {
@@ -56,7 +56,7 @@ export interface LLMProvider {
   name: string;
   generateStep(
     messages: Message[],
-    tools: AgentTool[],
+    tools: AgentTool<any>[],
     systemInstruction: string
   ): Promise<StepOutput>;
   

@@ -6,7 +6,7 @@ import { dataCalculatorTool } from './data-calculator.js';
 import { query } from '../db/postgres.js';
 
 export class ToolRegistry {
-  private tools: Map<string, AgentTool> = new Map();
+  private tools: Map<string, AgentTool<any>> = new Map();
 
   constructor() {
     this.register(httpFetcherTool);
@@ -15,15 +15,15 @@ export class ToolRegistry {
     this.register(dataCalculatorTool);
   }
 
-  register(tool: AgentTool) {
+  register(tool: AgentTool<any>) {
     this.tools.set(tool.name, tool);
   }
 
-  get(name: string): AgentTool | undefined {
+  get(name: string): AgentTool<any> | undefined {
     return this.tools.get(name);
   }
 
-  getAll(): AgentTool[] {
+  getAll(): AgentTool<any>[] {
     return Array.from(this.tools.values());
   }
 
@@ -47,14 +47,10 @@ export class ToolRegistry {
     }
 
     try {
-      // 1. Strict Schema Validation with Zod
       const parsedArgs = tool.parameters.parse(rawArgs);
-
-      // 2. Execute with Execution Context
       const output = await tool.execute(parsedArgs, context);
       const durationMs = Date.now() - start;
 
-      // 3. Write non-blocking audit log to PostgreSQL
       this.recordAuditLog(context.sessionId, toolName, parsedArgs, output, 'success', context.userIp, durationMs);
 
       return {
@@ -92,7 +88,6 @@ export class ToolRegistry {
     ip?: string,
     durationMs?: number
   ) {
-    // Non-blocking asynchronous query
     query(
       `INSERT INTO agent_audit_logs (session_id, action, tool_name, input_payload, output_payload, status, ip_address, execution_time_ms)
        VALUES ($1, 'tool_execution', $2, $3, $4, $5, $6, $7)`,
