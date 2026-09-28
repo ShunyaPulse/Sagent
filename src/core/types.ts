@@ -1,6 +1,6 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-export type Role = 'user' | 'model' | 'system' | 'tool';
+export type Role = "user" | "model" | "system" | "tool";
 
 export interface ToolCall {
   id: string;
@@ -31,12 +31,23 @@ export interface AgentContext {
 }
 
 export type AgentStreamEvent =
-  | { type: 'thought'; step: number; thought: string }
-  | { type: 'tool_call'; tool: string; args: Record<string, any>; callId: string }
-  | { type: 'tool_result'; tool: string; result: any; durationMs: number; isError?: boolean }
-  | { type: 'token'; text: string }
-  | { type: 'done'; sessionId: string; totalTokens: number; latencyMs: number }
-  | { type: 'error'; message: string };
+  | { type: "thought"; step: number; thought: string }
+  | {
+      type: "tool_call";
+      tool: string;
+      args: Record<string, any>;
+      callId: string;
+    }
+  | {
+      type: "tool_result";
+      tool: string;
+      result: any;
+      durationMs: number;
+      isError?: boolean;
+    }
+  | { type: "token"; text: string }
+  | { type: "done"; sessionId: string; totalTokens: number; latencyMs: number }
+  | { type: "error"; message: string };
 
 export interface AgentTool<TParams extends z.ZodTypeAny = any> {
   name: string;
@@ -57,13 +68,13 @@ export interface LLMProvider {
   generateStep(
     messages: Message[],
     tools: AgentTool<any>[],
-    systemInstruction: string
+    systemInstruction: string,
   ): Promise<StepOutput>;
-  
+
   streamFinalAnswer(
     messages: Message[],
     systemInstruction: string,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
   ): Promise<{ fullText: string; tokensUsed: number }>;
 }
 
