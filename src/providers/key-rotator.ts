@@ -132,20 +132,9 @@ export class GeminiKeyRotator {
           const status =
             err.status || (err.response ? err.response.status : null);
 
-          // 429 Rate Limit / Quota Exhaustion: Try next key on SAME model
-          if (
-            status === 429 ||
-            msg.includes("429") ||
-            msg.includes("resource_exhausted") ||
-            msg.includes("quota")
-          ) {
-            console.log(
-              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] rate-limited on ${modelName}, trying next key...`,
-            );
-            continue;
-          }
-
-          // 503 / 500 / Overloaded / High Demand: Try next key without blacklisting
+          // 1. 503 / 500 / Overloaded / High Demand: Google datacenter capacity issue on this model.
+          // Fast-switch immediately to next candidate model without burning all 34 keys.
+          // (No persistent blacklisting: next chat prompt starts fresh from top model).
           if (
             status === 503 ||
             status === 500 ||
@@ -156,12 +145,13 @@ export class GeminiKeyRotator {
             msg.includes("overloaded")
           ) {
             console.log(
-              `  ⚡ Key [${keyIdx + 1}/${this.keys.length}] hit temporary server load on ${modelName}, trying next key...`,
+              `  ⚡ ${modelName} is experiencing temporary high demand (503). Fast-switching to next candidate model...`,
             );
-            continue;
+            modelExhausted = false;
+            break;
           }
 
-          // 404 Model Not Found on this endpoint: jump to next model immediately
+          // 2. 404 Model Not Found on this endpoint: jump to next model immediately
           if (
             status === 404 ||
             msg.includes("404") ||
@@ -169,6 +159,19 @@ export class GeminiKeyRotator {
           ) {
             modelExhausted = false;
             break;
+          }
+
+          // 3. 429 Rate Limit / Quota Exhaustion on this specific key: Try next key on SAME model
+          if (
+            status === 429 ||
+            msg.includes("429") ||
+            msg.includes("resource_exhausted") ||
+            msg.includes("quota")
+          ) {
+            console.log(
+              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] rate-limited on ${modelName}: ${msg.slice(0, 120)}`,
+            );
+            continue;
           }
 
           // Other error: try next key

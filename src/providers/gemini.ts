@@ -15,6 +15,7 @@ export { SARALGATI_CANDIDATE_MODELS };
 export class GeminiProvider implements LLMProvider {
   public name = "gemini";
   private preferredModel: string;
+  private lastWorkingModel: string | null = null;
   private rotator: GeminiKeyRotator;
 
   constructor(apiKey?: string, modelName?: string) {
@@ -114,8 +115,9 @@ export class GeminiProvider implements LLMProvider {
           finalAnswer: toolCalls.length === 0 ? thoughtText : undefined,
           tokensUsed: response.usageMetadata?.totalTokenCount || 0,
         };
-      }, this.preferredModel);
+      }, this.lastWorkingModel || this.preferredModel);
 
+    this.lastWorkingModel = modelUsed;
     return result;
   }
 
@@ -124,12 +126,44 @@ export class GeminiProvider implements LLMProvider {
     systemInstruction: string,
     onToken: (token: string) => void,
   ): Promise<{ fullText: string; tokensUsed: number }> {
-    const contents = messages.map((m) => ({
-      role: m.role === "model" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+    const contents = messages.map((m) => {
+      const parts: any[] = [];
+      if (m.content) {
+        parts.push({ text: m.content });
+      }
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        for (const tc of m.toolCalls) {
+          parts.push({
+            functionCall: {
+              name: tc.name,
+              args: tc.arguments,
+            },
+          });
+        }
+      }
+      if (m.toolResults && m.toolResults.length > 0) {
+        for (const tr of m.toolResults) {
+          parts.push({
+            functionResponse: {
+              name: tr.name,
+              response: { output: tr.output, isError: tr.isError },
+            },
+          });
+        }
+      }
 
-    const { result } = await this.rotator.executeModelFirst(
+      // Ensure parts is never empty
+      if (parts.length === 0) {
+        parts.push({ text: " " });
+      }
+
+      return {
+        role: m.role === "model" ? "model" : "user",
+        parts,
+      };
+    });
+
+    const { result, modelUsed } = await this.rotator.executeModelFirst(
       async (modelName, apiKey) => {
         const ai = new GoogleGenAI({ apiKey });
         const responseStream = await ai.models.generateContentStream({
@@ -157,9 +191,10 @@ export class GeminiProvider implements LLMProvider {
 
         return { fullText, tokensUsed };
       },
-      this.preferredModel,
+      this.lastWorkingModel || this.preferredModel,
     );
 
+    this.lastWorkingModel = modelUsed;
     return result;
   }
 }

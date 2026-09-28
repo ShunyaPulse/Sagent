@@ -23,6 +23,8 @@ Type your prompt below. Type 'exit' or 'quit' to end session.
     output: process.stdout,
   });
 
+  let isRunning = false;
+
   const ask = () => {
     rl.question("\n\x1b[36mYou > \x1b[0m", async (input) => {
       const trimmed = (input || "").trim();
@@ -40,6 +42,7 @@ Type your prompt below. Type 'exit' or 'quit' to end session.
       }
 
       console.log("\n\x1b[33m⚡ Sagent is reasoning...\x1b[0m");
+      isRunning = true;
 
       try {
         await engine.run({
@@ -72,14 +75,22 @@ Type your prompt below. Type 'exit' or 'quit' to end session.
         });
       } catch (err: any) {
         console.error("\n\x1b[31mError running prompt:\x1b[0m", err.message);
+      } finally {
+        isRunning = false;
       }
 
-      ask();
+      if (process.stdin.isTTY) {
+        ask();
+      } else {
+        process.exit(0);
+      }
     });
   };
 
   rl.on("close", () => {
-    process.exit(0);
+    if (!isRunning) {
+      process.exit(0);
+    }
   });
 
   ask();
