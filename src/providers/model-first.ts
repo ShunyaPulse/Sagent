@@ -49,9 +49,11 @@ export class ModelFirstProvider implements LLMProvider {
       (env.LLM_PROVIDER === "cloudflare" || env.CLOUDFLARE_LORA_NAME)
     ) {
       try {
-        console.log(
-          "⚡ [Tier 1: Cloudflare LoRA] Generating step with custom model...",
-        );
+        if (process.env.DEBUG_PROVIDERS === "true") {
+          console.log(
+            "⚡ [Tier 1: Cloudflare LoRA] Generating step with custom model...",
+          );
+        }
         const cfResult = await this.cloudflareProvider.generateStep(
           messages,
           tools,

@@ -3,8 +3,20 @@ import { env } from '../config/env.js';
 
 const { Pool } = pg;
 
+// Suppress pg-connection-string SSL deprecation warning in Node 20+
+process.on('warning', (warning) => {
+  if (warning.name === 'SecurityWarning' || warning.message.includes('SSL modes')) {
+    return;
+  }
+  console.warn(warning);
+});
+
+const normalizedDbUrl = env.DATABASE_URL
+  ? env.DATABASE_URL.replace(/sslmode=(require|prefer|verify-ca)/g, 'sslmode=verify-full')
+  : undefined;
+
 export const pool = new Pool({
-  connectionString: env.DATABASE_URL,
+  connectionString: normalizedDbUrl,
   ssl: {
     rejectUnauthorized: false
   },
@@ -25,7 +37,7 @@ export async function query<T extends pg.QueryResultRow = any>(
   const res = await pool.query<T>(text, params);
   const duration = Date.now() - start;
   
-  if (env.NODE_ENV === 'development') {
+  if (process.env.DEBUG_SQL === 'true') {
     console.log(`[SQL Query] (${duration}ms) ${text.slice(0, 80)}...`);
   }
   return res;

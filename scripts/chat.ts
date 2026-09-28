@@ -3,6 +3,14 @@ import { AgentEngine } from "../src/core/engine.js";
 import { getLLMProvider } from "../src/providers/index.js";
 import { env } from "../src/config/env.js";
 
+// Suppress pg-connection-string security warning
+process.on("warning", (warning) => {
+  if (warning.name === "SecurityWarning" || warning.message.includes("SSL modes")) {
+    return;
+  }
+  console.warn(warning);
+});
+
 async function main() {
   console.log(`
 ======================================================================
@@ -41,7 +49,7 @@ Type your prompt below. Type 'exit' or 'quit' to end session.
         process.exit(0);
       }
 
-      console.log("\n\x1b[33m⚡ Sagent is reasoning...\x1b[0m");
+      console.log("\x1b[33m⚡ Sagent is thinking...\x1b[0m");
       isRunning = true;
 
       try {
@@ -51,23 +59,36 @@ Type your prompt below. Type 'exit' or 'quit' to end session.
           provider,
           onEvent: (event) => {
             if (event.type === "thought") {
-              console.log(
-                `\x1b[90m💭 [Thought Step ${event.step}]: ${event.thought}\x1b[0m`,
-              );
+              if (
+                event.thought &&
+                event.thought !== "Direct response generated" &&
+                process.env.DEBUG_THOUGHTS === "true"
+              ) {
+                console.log(`\x1b[90m💭 ${event.thought}\x1b[0m`);
+              }
             } else if (event.type === "tool_call") {
-              console.log(
-                `\x1b[34m🔧 [Tool Call]: ${event.tool}(${JSON.stringify(event.args)})\x1b[0m`,
-              );
+              const display =
+                event.tool === "sql_vector_search"
+                  ? "Searching internal knowledge base..."
+                  : event.tool === "http_fetcher"
+                    ? "Fetching web source..."
+                    : `Running tool: ${event.tool}...`;
+              console.log(`\x1b[34m🔧 ${display}\x1b[0m`);
             } else if (event.type === "tool_result") {
-              console.log(
-                `\x1b[32m✔ [Tool Result (${event.durationMs}ms)]: ${JSON.stringify(event.result).slice(0, 150)}...\x1b[0m`,
-              );
+              if (process.env.DEBUG_TOOLS === "true") {
+                console.log(
+                  `\x1b[32m✔ [Result (${event.durationMs}ms)]: ${JSON.stringify(event.result).slice(0, 100)}...\x1b[0m`,
+                );
+              }
             } else if (event.type === "token") {
               process.stdout.write(`\x1b[37m${event.text}\x1b[0m`);
             } else if (event.type === "done") {
-              console.log(
-                `\n\n\x1b[35m[Done in ${event.latencyMs}ms | ${event.totalTokens} tokens]\x1b[0m`,
-              );
+              console.log("\n");
+              if (process.env.DEBUG_METRICS === "true") {
+                console.log(
+                  `\x1b[35m[Done in ${event.latencyMs}ms | ${event.totalTokens} tokens]\x1b[0m\n`,
+                );
+              }
             } else if (event.type === "error") {
               console.error(`\x1b[31m❌ [Error]: ${event.message}\x1b[0m`);
             }

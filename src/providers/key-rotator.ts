@@ -41,7 +41,7 @@ export class GeminiKeyRotator {
 
     if (this.keys.length === 0) {
       console.warn("⚠️ No Gemini API keys found in GEMINI_API_KEY.");
-    } else {
+    } else if (process.env.DEBUG_ROTATOR === "true") {
       console.log(
         `🔑 Loaded ${this.keys.length} Gemini API Key(s) for Model-First Exhaustive Rotation.`,
       );

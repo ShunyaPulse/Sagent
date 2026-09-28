@@ -87,13 +87,45 @@ You must respond in strict JSON format matching ONE of these two schemas:
     }
 
     const data: any = await res.json();
-    const rawResponse = data.result?.response || '';
+    const rawResult = data.result?.response ?? data.result?.choices?.[0]?.message?.content ?? '';
 
-    // Parse JSON ReAct output
-    try {
-      const cleanJson = rawResponse.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
-      const parsed = JSON.parse(cleanJson);
+    let parsed: any = null;
 
+    if (typeof rawResult === 'object' && rawResult !== null) {
+      parsed = rawResult;
+    } else if (typeof rawResult === 'string') {
+      try {
+        const cleanJson = rawResult.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+        parsed = JSON.parse(cleanJson);
+      } catch {
+        // Regex fallback if JSON.parse fails on unescaped newlines or syntax quirks
+        const toolMatch = rawResult.match(/"tool"\s*:\s*"([^"]+)"/);
+        const answerMatch = rawResult.match(/"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/);
+        const thoughtMatch = rawResult.match(/"thought"\s*:\s*"([\s\S]*?)"/);
+
+        if (toolMatch) {
+          let args = {};
+          const argsMatch = rawResult.match(/"arguments"\s*:\s*(\{[\s\S]*?\})/);
+          if (argsMatch) {
+            try {
+              args = JSON.parse(argsMatch[1]);
+            } catch {}
+          }
+          parsed = {
+            tool: toolMatch[1],
+            arguments: args,
+            thought: thoughtMatch ? thoughtMatch[1] : undefined
+          };
+        } else if (answerMatch) {
+          parsed = {
+            finalAnswer: answerMatch[1],
+            thought: thoughtMatch ? thoughtMatch[1] : undefined
+          };
+        }
+      }
+    }
+
+    if (parsed && typeof parsed === 'object') {
       if (parsed.tool) {
         const toolCalls: ToolCall[] = [
           {
@@ -108,17 +140,19 @@ You must respond in strict JSON format matching ONE of these two schemas:
         };
       }
 
-      return {
-        thought: parsed.thought,
-        finalAnswer: parsed.finalAnswer || rawResponse
-      };
-    } catch {
-      // Fallback if not valid JSON
-      return {
-        thought: 'Direct response generated',
-        finalAnswer: rawResponse
-      };
+      if (parsed.finalAnswer) {
+        return {
+          thought: parsed.thought,
+          finalAnswer: parsed.finalAnswer
+        };
+      }
     }
+
+    // Fallback if model gave raw text without JSON wrapping
+    const fallbackAnswer = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult);
+    return {
+      finalAnswer: fallbackAnswer
+    };
   }
 
   async streamFinalAnswer(
