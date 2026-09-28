@@ -5,31 +5,26 @@ import { env } from '../config/env.js';
 import { GeminiKeyRotator } from './key-rotator.js';
 
 /**
- * Full AI Studio Model Escalation Matrix
- * Sorted strategically from Eco/High-Quota Fast models -> Cutting-edge Flash -> Deep Pro Reasoning
+ * Filtered list of ONLY ACTIVE Google AI Studio models with Non-Zero Free Quotas
+ * (Excludes all 0/0 quota models like gemini-2.5-pro, gemini-3.1-pro, gemini-2-flash)
  */
-export const FULL_GEMINI_MODELS_PROGRESSION = [
-  // 1. High-Quota Eco / Flash-Lite Tier (15 RPM / 500 RPD per key)
+export const ACTIVE_GEMINI_MODELS_PROGRESSION = [
+  // 1. High-Volume Flash-Lite Tier (15 RPM / 500 RPD per key)
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
   'gemini-2.5-flash-lite',
-  
-  // 2. Mainstream Intelligence Flash Tier (Native tool calling & fast reasoning)
-  'gemini-2.5-flash',
+
+  // 2. High-Intelligence Flash Tier (5 RPM / 20 RPD per key)
   'gemini-3.7-flash',
   'gemini-3.8-flash',
   'gemini-3.5-flash',
   'gemini-3.6-flash',
   'gemini-3-flash',
-  'gemini-flash-latest',
-  
-  // 3. High-Throughput Open Models (30 RPM / 14,400 RPD per key)
+  'gemini-2.5-flash',
+
+  // 3. High-Throughput Open Weights Tier (30 RPM / 14,400 RPD per key)
   'gemma-4-26b',
-  'gemma-4-31b',
-  
-  // 4. Maximum Intelligence / Pro Synthesis Tier
-  'gemini-2.5-pro',
-  'gemini-3.1-pro'
+  'gemma-4-31b'
 ];
 
 export class GeminiProvider implements LLMProvider {
@@ -92,10 +87,10 @@ export class GeminiProvider implements LLMProvider {
       };
     });
 
-    // Multi-Model Escalation across ALL available AI Studio models
+    // Multi-Model Escalation across ONLY Active Non-Zero Models
     const modelsToTry = [
       this.modelName,
-      ...FULL_GEMINI_MODELS_PROGRESSION.filter((m) => m !== this.modelName)
+      ...ACTIVE_GEMINI_MODELS_PROGRESSION.filter((m) => m !== this.modelName)
     ];
     let lastError: any;
 
@@ -139,7 +134,7 @@ export class GeminiProvider implements LLMProvider {
         });
       } catch (err: any) {
         lastError = err;
-        console.warn(`⚠️ Model "${model}" hit quota/error. Auto-escalating to next model in progression...`);
+        console.warn(`⚠️ Active model "${model}" hit quota/error. Auto-escalating to next active model...`);
       }
     }
 
@@ -158,7 +153,7 @@ export class GeminiProvider implements LLMProvider {
 
     const modelsToTry = [
       this.modelName,
-      ...FULL_GEMINI_MODELS_PROGRESSION.filter((m) => m !== this.modelName)
+      ...ACTIVE_GEMINI_MODELS_PROGRESSION.filter((m) => m !== this.modelName)
     ];
     let lastError: any;
 
@@ -193,7 +188,7 @@ export class GeminiProvider implements LLMProvider {
         });
       } catch (err: any) {
         lastError = err;
-        console.warn(`⚠️ Stream on model "${model}" hit error. Escalating to next model...`);
+        console.warn(`⚠️ Stream on model "${model}" hit error. Escalating to next active model...`);
       }
     }
 
