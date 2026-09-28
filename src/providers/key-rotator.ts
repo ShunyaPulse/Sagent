@@ -12,18 +12,19 @@
 import { env } from "../config/env.js";
 
 export const SARALGATI_CANDIDATE_MODELS = [
-  "gemini-3.8-flash", // Latest stable, highest quality  (5 RPM / 20 RPD)
-  "gemini-3.7-flash", // Previous gen, highly capable    (5 RPM / 20 RPD)
-  "gemini-3.6-flash", // Solid fast fallback             (5 RPM / 20 RPD)
-  "gemini-3.5-flash", // Widely available               (5 RPM / 20 RPD)
-  "gemini-3-flash-preview", // Gemini 3 Flash Preview          (5 RPM / 20 RPD)
-  "gemini-2.5-flash", // Stable Gemini 2.5 Flash         (5 RPM / 20 RPD)
-  "gemini-3.5-flash-lite", // High-throughput lite            (15 RPM / 500 RPD)
-  "gemini-3.1-flash-lite", // High-throughput lite            (15 RPM / 500 RPD)
-  "gemini-2.5-flash-lite", // Ultra-fast 2.5 lite             (10 RPM / 20 RPD)
-  "gemma-4-26b", // Open weights 26B model          (30 RPM / 14,400 RPD)
-  "gemma-4-31b", // Open weights 31B model          (30 RPM / 14,400 RPD)
-  "gemini-flash-latest", // Dynamic alias fallback
+  "gemini-3.8-flash",         // Latest stable, highest quality  (5 RPM / 20 RPD)
+  "gemini-3.7-flash",         // Previous gen, highly capable    (5 RPM / 20 RPD)
+  "gemini-3.6-flash",         // Solid fast fallback             (5 RPM / 20 RPD)
+  "gemini-3.5-flash",         // Widely available               (5 RPM / 20 RPD)
+  "gemini-3-flash-preview",   // Gemini 3 Flash Preview          (5 RPM / 20 RPD)
+  "gemini-2.5-flash",         // Stable Gemini 2.5 Flash         (5 RPM / 20 RPD)
+  "gemini-3.5-flash-lite",    // High-throughput lite            (15 RPM / 500 RPD)
+  "gemini-3.1-flash-lite",    // High-throughput lite            (15 RPM / 500 RPD)
+  "gemini-2.5-flash-lite",    // Ultra-fast 2.5 lite             (10 RPM / 20 RPD)
+  "gemma-4-26b-a4b-it",       // Gemma 4 26B instruction-tuned   (30 RPM / 14,400 RPD)
+  "gemma-4-31b-it",           // Gemma 4 31B instruction-tuned   (30 RPM / 14,400 RPD)
+  "gemini-flash-lite-latest", // High-throughput lite fallback
+  "gemini-flash-latest",      // Dynamic alias fallback
 ];
 
 export class GeminiKeyRotator {
@@ -115,6 +116,7 @@ export class GeminiKeyRotator {
 
     for (const modelName of candidateModels) {
       let modelExhausted = true;
+      let consecutive429 = 0;
 
       for (let i = 0; i < this.keys.length; i++) {
         const keyIdx = (this.currentKeyIndex + i) % this.keys.length;
@@ -161,16 +163,26 @@ export class GeminiKeyRotator {
             break;
           }
 
-          // 3. 429 Rate Limit / Quota Exhaustion on this specific key: Try next key on SAME model
+          // 3. 429 Rate Limit / Quota Exhaustion on this specific key:
           if (
             status === 429 ||
             msg.includes("429") ||
             msg.includes("resource_exhausted") ||
             msg.includes("quota")
           ) {
+            consecutive429++;
             console.log(
-              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] rate-limited on ${modelName}: ${msg.slice(0, 120)}`,
+              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] rate-limited on ${modelName} (${consecutive429}/3)`,
             );
+            // If 3 keys in a row hit quota exhaustion on this model, project quota is reached.
+            // Fast-fall to the next candidate model so user gets instant response.
+            if (consecutive429 >= 3) {
+              console.log(
+                `  ⚡ ${modelName} quota reached. Fast-falling to next candidate model...`,
+              );
+              modelExhausted = false;
+              break;
+            }
             continue;
           }
 
