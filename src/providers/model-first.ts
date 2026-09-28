@@ -73,11 +73,25 @@ export class ModelFirstProvider implements LLMProvider {
     // -------------------------------------------------------------
     // Tier 2: Gemini Model-First Candidates & 34-Key Matrix Progression
     // -------------------------------------------------------------
-    return await this.geminiProvider.generateStep(
-      messages,
-      tools,
-      systemInstruction,
-    );
+    try {
+      return await this.geminiProvider.generateStep(
+        messages,
+        tools,
+        systemInstruction,
+      );
+    } catch (geminiErr: any) {
+      if (this.cloudflareProvider) {
+        console.warn(
+          `⚡ Gemini candidate pool exhausted (${geminiErr.message}). Seamlessly falling back to Cloudflare Workers AI...`,
+        );
+        return await this.cloudflareProvider.generateStep(
+          messages,
+          tools,
+          systemInstruction,
+        );
+      }
+      throw geminiErr;
+    }
   }
 
   async streamFinalAnswer(
@@ -99,10 +113,24 @@ export class ModelFirstProvider implements LLMProvider {
       }
     }
 
-    return await this.geminiProvider.streamFinalAnswer(
-      messages,
-      systemInstruction,
-      onToken,
-    );
+    try {
+      return await this.geminiProvider.streamFinalAnswer(
+        messages,
+        systemInstruction,
+        onToken,
+      );
+    } catch (geminiErr: any) {
+      if (this.cloudflareProvider) {
+        console.warn(
+          `⚡ Gemini stream exhausted (${geminiErr.message}). Seamlessly falling back to Cloudflare Workers AI stream...`,
+        );
+        return await this.cloudflareProvider.streamFinalAnswer(
+          messages,
+          systemInstruction,
+          onToken,
+        );
+      }
+      throw geminiErr;
+    }
   }
 }

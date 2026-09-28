@@ -12,7 +12,7 @@ const chatRequestSchema = z.object({
   tenantId: z.string().default('default'),
   message: z.string().min(1, 'Message cannot be empty').max(10000, 'Message exceeds 10KB limit'),
   stream: z.boolean().default(true),
-  modelProvider: z.enum(['gemini', 'cloudflare']).optional(),
+  modelProvider: z.enum(['model-first', 'gemini', 'cloudflare']).optional(),
   turnstileToken: z.string().optional()
 });
 
@@ -30,7 +30,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
           tenantId: { type: 'string' },
           message: { type: 'string' },
           stream: { type: 'boolean' },
-          modelProvider: { type: 'string', enum: ['gemini', 'cloudflare'] },
+          modelProvider: { type: 'string', enum: ['model-first', 'gemini', 'cloudflare'] },
           turnstileToken: { type: 'string' }
         }
       }

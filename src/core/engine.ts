@@ -179,8 +179,12 @@ export class AgentEngine {
         }`;
       }
 
+      const finalAnswerStr = typeof finalAnswer === 'string'
+        ? finalAnswer
+        : (typeof (finalAnswer as any)?.finalAnswer === 'string' ? (finalAnswer as any).finalAnswer : JSON.stringify(finalAnswer, null, 2));
+
       // Stream the answer tokens to the client
-      const chunks = finalAnswer.match(/.{1,12}/g) || [finalAnswer];
+      const chunks = finalAnswerStr.match(/.{1,12}/g) || [finalAnswerStr];
       for (const chunk of chunks) {
         emit({ type: 'token', text: chunk });
       }
@@ -193,7 +197,7 @@ export class AgentEngine {
          VALUES ($1, 'model', $2, $3, $4, $5, $6)`,
         [
           context.sessionId,
-          finalAnswer,
+          finalAnswerStr,
           JSON.stringify(allToolCallsExecuted),
           JSON.stringify(allToolResultsRecorded),
           totalTokens,

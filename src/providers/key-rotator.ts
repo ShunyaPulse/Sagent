@@ -172,7 +172,7 @@ export class GeminiKeyRotator {
           ) {
             consecutive429++;
             console.log(
-              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] rate-limited on ${modelName} (${consecutive429}/3)`,
+              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] rate-limited on ${modelName} (${consecutive429}/3): status=${status} msg=${msg.slice(0, 120)}`,
             );
             // If 3 keys in a row hit quota exhaustion on this model, project quota is reached.
             // Fast-fall to the next candidate model so user gets instant response.
