@@ -83,6 +83,29 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
+          trap 'rm -f /tmp/env.yaml' EXIT
+          node -e '
+            const fs = require("fs");
+            const env = {
+              NODE_ENV: "production",
+              DATABASE_URL: process.env.DATABASE_URL,
+              AUTH_SECRET: process.env.AUTH_SECRET,
+              ORIGIN_SECRET: process.env.ORIGIN_SECRET,
+              GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+              CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+              CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+              CLOUDFLARE_LORA_NAME: process.env.CLOUDFLARE_LORA_NAME,
+              REDIS_URL: process.env.REDIS_URL
+            };
+            let yaml = "";
+            for (const [k, v] of Object.entries(env)) {
+              if (v !== undefined) {
+                yaml += `${k}: ${JSON.stringify(v)}\n`;
+              }
+            }
+            fs.writeFileSync("/tmp/env.yaml", yaml, { mode: 0o600 });
+          '
+
           IMAGE=$(echo "ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_SHA}" | tr '[:upper:]' '[:lower:]')
           echo "Deploying container image: $IMAGE to Cloud Run service: $SERVICE_NAME"
 
@@ -99,7 +122,7 @@ jobs:
             --concurrency=80 \
             --cpu-throttling \
             --port=8080 \
-            --set-env-vars="NODE_ENV=production,DATABASE_URL=${DATABASE_URL},AUTH_SECRET=${AUTH_SECRET},ORIGIN_SECRET=${ORIGIN_SECRET},GEMINI_API_KEY=${GEMINI_API_KEY},CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID},CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN},CLOUDFLARE_LORA_NAME=${CLOUDFLARE_LORA_NAME},REDIS_URL=${REDIS_URL}"
+            --env-vars-file=/tmp/env.yaml
 
           echo "Deployment complete! Live Cloud Run URL:"
           gcloud run services describe "$SERVICE_NAME" --region="$REGION" --project="$GCP_PROJECT" --format='value(status.url)'
