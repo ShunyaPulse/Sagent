@@ -4,8 +4,17 @@ import { AgentTool } from '../core/types.js';
 import { assertSafeUrl } from '../security/ssrf.js';
 
 const httpFetcherSchema = z.object({
-  url: z.string().url('Must be a valid HTTP or HTTPS URL'),
-  maxCharacters: z.number().int().min(100).max(10000).default(3000)
+  url: z
+    .string()
+    .transform((val) => {
+      let trimmed = val.trim();
+      if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        trimmed = 'https://' + trimmed;
+      }
+      return trimmed;
+    })
+    .pipe(z.string().url('Must be a valid HTTP or HTTPS URL')),
+  maxCharacters: z.coerce.number().int().min(100).max(10000).default(3000)
 });
 
 export const httpFetcherTool: AgentTool<typeof httpFetcherSchema> = {

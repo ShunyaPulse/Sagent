@@ -5,8 +5,17 @@ import { assertSafeUrl } from '../security/ssrf.js';
 import { env } from '../config/env.js';
 
 const webhookSchema = z.object({
-  targetUrl: z.string().url('Target webhook must be a valid HTTP or HTTPS URL'),
-  payload: z.record(z.any()).describe('JSON payload to transmit in webhook body'),
+  targetUrl: z
+    .string()
+    .transform((val) => {
+      let trimmed = val.trim();
+      if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        trimmed = 'https://' + trimmed;
+      }
+      return trimmed;
+    })
+    .pipe(z.string().url('Target webhook must be a valid HTTP or HTTPS URL')),
+  payload: z.any().describe('JSON payload to transmit in webhook body'),
   event: z.string().default('agent.action.dispatched')
 });
 

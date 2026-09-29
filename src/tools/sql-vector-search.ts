@@ -3,11 +3,21 @@ import { AgentTool } from '../core/types.js';
 import { query } from '../db/postgres.js';
 import { getEmbeddingProvider } from '../providers/index.js';
 
-const sqlVectorSearchSchema = z.object({
-  searchQuery: z.string().min(2, 'Query must be at least 2 characters'),
-  limit: z.number().int().min(1).max(10).default(4),
-  minSimilarity: z.number().min(0).max(1).default(0.4)
-});
+const sqlVectorSearchSchema = z
+  .object({
+    searchQuery: z.string().optional().describe('Semantic search query string'),
+    query: z.string().optional().describe('Alias for searchQuery'),
+    limit: z.coerce.number().int().min(1).max(10).default(4),
+    minSimilarity: z.coerce.number().min(0).max(1).default(0.4),
+  })
+  .transform((data) => ({
+    searchQuery: (data.searchQuery || data.query || '').trim(),
+    limit: data.limit,
+    minSimilarity: data.minSimilarity,
+  }))
+  .refine((data) => data.searchQuery.length >= 2, {
+    message: 'Search query must be at least 2 characters long (use "searchQuery" or "query")',
+  });
 
 export const sqlVectorSearchTool: AgentTool<typeof sqlVectorSearchSchema> = {
   name: 'sql_vector_search',

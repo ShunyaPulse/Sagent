@@ -3,7 +3,7 @@ import { AgentTool } from '../core/types.js';
 
 const calculatorSchema = z.object({
   expression: z.string().describe('Arithmetic expression to compute, e.g. " (450 * 1.18) - 50 " or "Math.sqrt(144) + 25"'),
-  precision: z.number().int().min(0).max(10).default(4)
+  precision: z.coerce.number().int().min(0).max(10).default(4)
 });
 
 /**
