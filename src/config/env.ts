@@ -5,13 +5,13 @@ import path from "node:path";
 import fs from "node:fs";
 
 // 1. Load current working directory .env
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // 2. Load global user config from ~/.sagentic/.env if present
 try {
   const globalEnvPath = path.join(os.homedir(), ".sagentic", ".env");
   if (fs.existsSync(globalEnvPath)) {
-    dotenv.config({ path: globalEnvPath, override: false });
+    dotenv.config({ path: globalEnvPath, override: false, quiet: true });
   }
 } catch {}
 
