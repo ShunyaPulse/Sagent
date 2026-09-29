@@ -54,10 +54,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Prepare Google Cloud Credentials
+        id: gcp-auth-prep
+        env:
+          RAW_GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            let raw = process.env.RAW_GCP_SA_KEY || "";
+            let obj = JSON.parse(raw);
+            if (obj.private_key && obj.private_key.includes("\\n")) {
+              obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+            }
+            const clean = JSON.stringify(obj);
+            const delimiter = "EOF_" + Math.random().toString(36).slice(2);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `credentials_json<<${delimiter}\n${clean}\n${delimiter}\n`);
+          '
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ steps.gcp-auth-prep.outputs.credentials_json }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
