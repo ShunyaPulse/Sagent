@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Daily Dependency Vulnerability Scanning for NPM
+  # Daily Dependency Scanning for NPM (Major versions & Security advisories only)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -11,8 +11,13 @@ updates:
       - "security"
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
 
-  # Daily GitHub Actions Security Updates
+  # Daily GitHub Actions Updates (Major versions & Security advisories only)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -23,3 +28,8 @@ updates:
       - "security"
     commit-message:
       prefix: "ci(actions)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
