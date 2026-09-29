@@ -3,6 +3,11 @@ import { httpFetcherTool } from "./http-fetcher.js";
 import { sqlVectorSearchTool } from "./sql-vector-search.js";
 import { webhookDispatcherTool } from "./webhook-dispatcher.js";
 import { dataCalculatorTool } from "./data-calculator.js";
+import {
+  fileWriterTool,
+  fileReaderTool,
+  directoryListerTool,
+} from "./file-operations.js";
 import { query } from "../db/postgres.js";
 
 export class ToolRegistry {
@@ -13,6 +18,9 @@ export class ToolRegistry {
     this.register(sqlVectorSearchTool);
     this.register(webhookDispatcherTool);
     this.register(dataCalculatorTool);
+    this.register(fileWriterTool);
+    this.register(fileReaderTool);
+    this.register(directoryListerTool);
   }
 
   register(tool: AgentTool<any>) {

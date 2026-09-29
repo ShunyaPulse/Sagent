@@ -53,15 +53,19 @@ ${systemInstruction}
 Available Tools:
 ${JSON.stringify(toolSpecs, null, 2)}
 
-You must respond in strict JSON format matching ONE of these two schemas:
-1. If you need to call a tool:
+CRITICAL ACTION RULES:
+- If the user request requires an action (e.g. writing/creating a file, reading a file, searching documents, or calculations), you MUST call the appropriate tool.
+- You CANNOT write or modify files by simply outputting markdown text. You MUST output a tool call for "file_writer".
+- Respond in strict JSON format matching ONE of these two schemas:
+
+1. When calling a tool (e.g. to create/write a file):
 {
   "thought": "Your reasoning why you need this tool",
   "tool": "name_of_tool",
   "arguments": { ...tool parameters... }
 }
 
-2. If you have enough information to answer the user:
+2. Only when all required actions have been performed and you are answering the user:
 {
   "thought": "Your internal conclusion",
   "finalAnswer": "Your complete Markdown answer to the user"
@@ -133,31 +137,43 @@ You must respond in strict JSON format matching ONE of these two schemas:
           .trim();
         parsed = JSON.parse(cleanJson);
       } catch {
-        // Regex fallback if JSON.parse fails on unescaped newlines or syntax quirks
-        const toolMatch = rawResult.match(/"tool"\s*:\s*"([^"]+)"/);
-        const answerMatch = rawResult.match(
-          /"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/,
-        );
-        const thoughtMatch = rawResult.match(/"thought"\s*:\s*"([\s\S]*?)"/);
+        // Try extracting any { ... } JSON substring in the output
+        const jsonBlockMatch = rawResult.match(/\{[\s\S]*\}/);
+        if (jsonBlockMatch) {
+          try {
+            parsed = JSON.parse(jsonBlockMatch[0]);
+          } catch {}
+        }
 
-        if (toolMatch) {
-          let args = {};
-          const argsMatch = rawResult.match(/"arguments"\s*:\s*(\{[\s\S]*?\})/);
-          if (argsMatch) {
-            try {
-              args = JSON.parse(argsMatch[1]);
-            } catch {}
+        if (!parsed) {
+          // Regex fallback if JSON.parse fails on unescaped newlines or syntax quirks
+          const toolMatch = rawResult.match(/"tool"\s*:\s*"([^"]+)"/);
+          const answerMatch = rawResult.match(
+            /"finalAnswer"\s*:\s*"([\s\S]*?)"\s*\}/,
+          );
+          const thoughtMatch = rawResult.match(/"thought"\s*:\s*"([\s\S]*?)"/);
+
+          if (toolMatch) {
+            let args = {};
+            const argsMatch = rawResult.match(
+              /"arguments"\s*:\s*(\{[\s\S]*?\})/,
+            );
+            if (argsMatch) {
+              try {
+                args = JSON.parse(argsMatch[1]);
+              } catch {}
+            }
+            parsed = {
+              tool: toolMatch[1],
+              arguments: args,
+              thought: thoughtMatch ? thoughtMatch[1] : undefined,
+            };
+          } else if (answerMatch) {
+            parsed = {
+              finalAnswer: answerMatch[1],
+              thought: thoughtMatch ? thoughtMatch[1] : undefined,
+            };
           }
-          parsed = {
-            tool: toolMatch[1],
-            arguments: args,
-            thought: thoughtMatch ? thoughtMatch[1] : undefined,
-          };
-        } else if (answerMatch) {
-          parsed = {
-            finalAnswer: answerMatch[1],
-            thought: thoughtMatch ? thoughtMatch[1] : undefined,
-          };
         }
       }
     }
@@ -183,6 +199,32 @@ You must respond in strict JSON format matching ONE of these two schemas:
           finalAnswer: parsed.finalAnswer,
         };
       }
+    }
+
+    // Check if fallback text contains an embedded tool call
+    const embeddedToolMatch =
+      typeof rawResult === "string"
+        ? rawResult.match(/"tool"\s*:\s*"([^"]+)"/)
+        : null;
+    if (embeddedToolMatch) {
+      let args = {};
+      const argsMatch = (rawResult as string).match(
+        /"arguments"\s*:\s*(\{[\s\S]*?\})/,
+      );
+      if (argsMatch) {
+        try {
+          args = JSON.parse(argsMatch[1]);
+        } catch {}
+      }
+      return {
+        toolCalls: [
+          {
+            id: `cf_call_${Date.now()}`,
+            name: embeddedToolMatch[1],
+            arguments: args,
+          },
+        ],
+      };
     }
 
     // Fallback if model gave raw text without JSON wrapping
