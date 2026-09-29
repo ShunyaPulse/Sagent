@@ -48,6 +48,7 @@ export function resolveSafePath(targetPath: string): string {
 // -----------------------------------------------------------------------------
 // 1. File Writer Tool
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const fileWriterSchema = z.object({
   path: z
     .string()
@@ -59,22 +60,28 @@ const fileWriterSchema = z.object({
     .boolean()
     .default(true)
     .describe("Whether to overwrite if file already exists"),
+  append: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Whether to append content to the end of the file instead of overwriting",
+    ),
 });
 
 export const fileWriterTool: AgentTool<typeof fileWriterSchema> = {
   name: "file_writer",
   description:
-    "Creates a new file or overwrites an existing file within the workspace with safety checks.",
+    "Creates a new file or overwrites/appends to an existing file within the workspace with safety checks.",
   parameters: fileWriterSchema,
-  execute: async ({ path: targetPath, content, overwrite }) => {
+  execute: async ({ path: targetPath, content, overwrite, append }) => {
     try {
       const safePath = resolveSafePath(targetPath);
 
-      if (!overwrite) {
+      if (!overwrite && !append) {
         try {
           await fs.access(safePath);
           return {
-            error: `File already exists at "${targetPath}". Set overwrite: true to replace it.`,
+            error: `File already exists at "${targetPath}". Set overwrite: true to replace it or append: true to add content.`,
             success: false,
           };
         } catch {
@@ -85,12 +92,19 @@ export const fileWriterTool: AgentTool<typeof fileWriterSchema> = {
       // Ensure parent directories exist
       await fs.mkdir(path.dirname(safePath), { recursive: true });
 
-      await fs.writeFile(safePath, content, "utf-8");
+      if (append) {
+        await fs.appendFile(safePath, content, "utf-8");
+      } else {
+        await fs.writeFile(safePath, content, "utf-8");
+      }
 
+      const bytesWritten = Buffer.byteLength(content, "utf-8");
       return {
         path: path.relative(ROOT_WORKSPACE, safePath),
-        bytesWritten: Buffer.byteLength(content, "utf-8"),
+        bytesWritten,
+        mode: append ? "appended" : "written",
         success: true,
+        message: `File "${targetPath}" successfully ${append ? "appended" : "written"} (${bytesWritten} bytes). Task complete. Provide your final response.`,
       };
     } catch (err: any) {
       return {
@@ -116,8 +130,23 @@ export const fileReaderTool: AgentTool<typeof fileReaderSchema> = {
   name: "file_reader",
   description: "Reads the content of an existing file within the workspace.",
   parameters: fileReaderSchema,
-  execute: async ({ path: targetPath, maxLines }) => {
+  execute: async ({ path: targetPath, maxLines }, context) => {
     try {
+      // Check if file was provided from client workspace snapshot
+      if (context?.localFiles && context.localFiles[targetPath]) {
+        const raw = context.localFiles[targetPath];
+        const lines = raw.split("\n");
+        const truncated = lines.length > maxLines;
+        const content = truncated ? lines.slice(0, maxLines).join("\n") : raw;
+        return {
+          path: targetPath,
+          content,
+          totalLines: lines.length,
+          truncated,
+          source: "client_workspace",
+        };
+      }
+
       const safePath = resolveSafePath(targetPath);
       const raw = await fs.readFile(safePath, "utf-8");
       const lines = raw.split("\n");
@@ -155,8 +184,21 @@ export const directoryListerTool: AgentTool<typeof directoryListerSchema> = {
   description:
     "Lists files and subdirectories within a given workspace directory.",
   parameters: directoryListerSchema,
-  execute: async ({ path: targetPath, maxDepth }) => {
+  execute: async ({ path: targetPath, maxDepth }, context) => {
     try {
+      // If client workspace files provided, return them directly
+      if (context?.workspaceFiles && context.workspaceFiles.length > 0) {
+        return {
+          directory: targetPath,
+          source: "client_workspace",
+          entries: context.workspaceFiles.map((name: string) => ({
+            name,
+            path: name,
+            type: name.endsWith("/") ? "directory" : "file",
+          })),
+        };
+      }
+
       const safePath = resolveSafePath(targetPath);
 
       const IGNORED_DIRS = new Set([

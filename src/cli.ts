@@ -168,6 +168,120 @@ interface StreamState {
   currentTools: any[];
 }
 
+function resolveLocalSafePath(targetPath: string): string | null {
+  const cwd = process.cwd();
+  const normalized = path.normalize(targetPath).trim();
+  const absolutePath = path.isAbsolute(normalized)
+    ? normalized
+    : path.resolve(cwd, normalized);
+
+  if (!absolutePath.startsWith(cwd)) {
+    return null;
+  }
+
+  const base = path.basename(absolutePath);
+  if (
+    /^\.env/i.test(base) ||
+    /^\.git/i.test(base) ||
+    /\.key$/i.test(base) ||
+    /\.pem$/i.test(base)
+  ) {
+    return null;
+  }
+
+  return absolutePath;
+}
+
+async function syncClientWorkspaceTool(
+  tool: string,
+  args: Record<string, any>,
+): Promise<{ success: boolean; message?: string }> {
+  if (!args || !args.path) return { success: false };
+  const safePath = resolveLocalSafePath(args.path);
+  if (!safePath) {
+    return { success: false, message: `Access restricted for path: ${args.path}` };
+  }
+
+  try {
+    if (tool === "file_writer") {
+      await fs.mkdir(path.dirname(safePath), { recursive: true });
+      if (args.append) {
+        await fs.appendFile(safePath, args.content || "", "utf-8");
+      } else {
+        await fs.writeFile(safePath, args.content || "", "utf-8");
+      }
+      const relPath = path.relative(process.cwd(), safePath) || args.path;
+      return { success: true, message: `Saved locally to: ${relPath}` };
+    }
+
+    if (tool === "file_patcher") {
+      if (!fsSync.existsSync(safePath)) {
+        return { success: false, message: `Local file not found: ${args.path}` };
+      }
+      const raw = await fs.readFile(safePath, "utf-8");
+      const { targetContent, replacementContent, allowMultiple } = args;
+      if (targetContent && raw.includes(targetContent)) {
+        const updated = allowMultiple
+          ? raw.replaceAll(targetContent, replacementContent || "")
+          : raw.replace(targetContent, replacementContent || "");
+        await fs.writeFile(safePath, updated, "utf-8");
+        const relPath = path.relative(process.cwd(), safePath) || args.path;
+        return { success: true, message: `Patched locally: ${relPath}` };
+      }
+      return { success: false, message: "Target content not matched in local file" };
+    }
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+
+  return { success: false };
+}
+
+async function getLocalWorkspaceContext(userMessage: string): Promise<{
+  workspaceFiles: string[];
+  localFiles: Record<string, string>;
+}> {
+  const cwd = process.cwd();
+  const workspaceFiles: string[] = [];
+  const localFiles: Record<string, string> = {};
+
+  try {
+    const entries = await fs.readdir(cwd, { withFileTypes: true });
+    const ignored = new Set([
+      "node_modules",
+      ".git",
+      "dist",
+      ".next",
+      ".cache",
+      ".sagentic",
+    ]);
+
+    for (const entry of entries) {
+      if (ignored.has(entry.name) || entry.name.startsWith(".env")) continue;
+      const name = entry.isDirectory() ? `${entry.name}/` : entry.name;
+      workspaceFiles.push(name);
+      if (workspaceFiles.length >= 40) break;
+    }
+
+    for (const entry of entries) {
+      if (entry.isFile() && !entry.name.startsWith(".env")) {
+        if (userMessage.includes(entry.name)) {
+          const filePath = path.join(cwd, entry.name);
+          try {
+            const stat = await fs.stat(filePath);
+            if (stat.size < 60000) {
+              const content = await fs.readFile(filePath, "utf-8");
+              localFiles[entry.name] = content;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  return { workspaceFiles, localFiles };
+}
+
 function handleStreamEvent(event: any, state: StreamState) {
   if (event.type === "thought") {
     if (
@@ -187,6 +301,17 @@ function handleStreamEvent(event: any, state: StreamState) {
     console.log(
       `\x1b[34m●\x1b[0m \x1b[1m${event.tool}\x1b[0m\x1b[90m(${details})\x1b[0m`,
     );
+
+    // Synchronize workspace files directly to the user's local disk
+    if (event.tool === "file_writer" || event.tool === "file_patcher") {
+      syncClientWorkspaceTool(event.tool, event.args).then((res) => {
+        if (res.success && res.message) {
+          console.log(
+            `  \x1b[90m└─\x1b[0m \x1b[32m✔ Local workspace:\x1b[0m \x1b[90m${res.message}\x1b[0m`,
+          );
+        }
+      });
+    }
   } else if (event.type === "tool_result") {
     const last = state.currentTools[state.currentTools.length - 1];
     if (last && last.tool === event.tool) {
@@ -242,6 +367,9 @@ async function runRemoteStream(
     process.env.API_SECRET ||
     env.AUTH_SECRET;
 
+  const { workspaceFiles, localFiles } =
+    await getLocalWorkspaceContext(userMessage);
+
   const response = await fetch(remoteUrl, {
     method: "POST",
     headers: {
@@ -253,6 +381,8 @@ async function runRemoteStream(
       tenantId: "default",
       message: userMessage,
       stream: true,
+      workspaceFiles,
+      localFiles,
     }),
     signal: abortSignal,
   });
@@ -375,11 +505,11 @@ export async function runCli(): Promise<void> {
       ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
       : "Base 8B";
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.6 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.7 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   } else {
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.6 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.7 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   }
 

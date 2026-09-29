@@ -56,7 +56,8 @@ ${JSON.stringify(toolSpecs, null, 2)}
 CRITICAL ACTION & FORMAT RULES:
 1. Available tools are action mechanisms, NOT files in the project. If the user asks to see or list files, you MUST invoke "directory_lister" with { "path": "." }. NEVER list tool names as files.
 2. If the user request requires an action (e.g. creating/writing a file, reading a file, searching documents, or calculations), you MUST call the appropriate tool. You CANNOT write or modify files through text alone.
-3. Respond in strict JSON format matching ONE of these schemas:
+3. When creating or writing a file with "file_writer", write the complete, thorough content in a SINGLE tool call. Once a file is written, your file creation task is complete! Do NOT call "file_writer" again on the same file. In the next step, immediately output finalAnswer explaining what was created.
+4. Respond in strict JSON format matching ONE of these schemas:
 
 When executing a tool:
 {
@@ -95,6 +96,24 @@ Response:
   "thought": "User wants to view file 'abc'. I will use file_reader.",
   "tool": "file_reader",
   "arguments": { "path": "abc" }
+}
+
+User:
+Tool Observations:
+[{"name": "file_writer", "output": {"path": "abc", "bytesWritten": 120, "success": true}}]
+Response:
+{
+  "thought": "The file 'abc' has been created and saved successfully. Action is complete.",
+  "finalAnswer": "I have created and saved \`abc\` successfully."
+}
+
+User:
+Tool Observations:
+[{"name": "data_calculator", "output": {"result": 42}}]
+Response:
+{
+  "thought": "Calculation is complete. Result is 42.",
+  "finalAnswer": "The result is **42**."
 }
 
 CRITICAL: In "finalAnswer", NEVER include "Thought:", "Final Answer:", or scratchpad tokens. Provide ONLY the final clean text addressed to the user.

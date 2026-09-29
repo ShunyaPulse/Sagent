@@ -102,6 +102,7 @@ export class AgentEngine {
       let finalAnswer: string | undefined;
       const allToolCallsExecuted: any[] = [];
       const allToolResultsRecorded: ToolResult[] = [];
+      const writtenPathsInRun = new Set<string>();
 
       // 3. ReAct Execution Loop (Step-by-step reasoning & action)
       while (stepsExecuted < env.MAX_REACT_STEPS) {
@@ -148,6 +149,19 @@ export class AgentEngine {
               callId: tc.id,
             });
 
+            // Prevent repetitive file_writer loop on the same file
+            if (tc.name === "file_writer") {
+              const targetPath = tc.arguments?.path;
+              const isAppend = Boolean(tc.arguments?.append);
+              if (targetPath && writtenPathsInRun.has(targetPath) && !isAppend) {
+                finalAnswer = `I have successfully created and saved "${targetPath}".`;
+                break;
+              }
+              if (targetPath) {
+                writtenPathsInRun.add(targetPath);
+              }
+            }
+
             // Execute through tool registry with self-correction & audit logging
             const result = await this.registry.executeTool(
               tc.name,
@@ -166,6 +180,14 @@ export class AgentEngine {
               durationMs: result.durationMs,
               isError: result.isError,
             });
+          }
+
+          if (finalAnswer) {
+            emit({
+              type: "token",
+              text: finalAnswer,
+            });
+            break;
           }
 
           // Feed tool observations back into the message history for the next reasoning step

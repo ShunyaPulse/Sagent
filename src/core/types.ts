@@ -28,6 +28,8 @@ export interface AgentContext {
   tenantId: string;
   userIp?: string;
   metadata?: Record<string, any>;
+  workspaceFiles?: string[];
+  localFiles?: Record<string, string>;
 }
 
 export type AgentStreamEvent =
