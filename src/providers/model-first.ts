@@ -42,16 +42,16 @@ export class ModelFirstProvider implements LLMProvider {
     systemInstruction: string,
   ): Promise<StepOutput> {
     // -------------------------------------------------------------
-    // Tier 1: Attempt Custom LoRA on Cloudflare Workers AI First
+    // Primary: Custom Fine-Tuned LoRA on Cloudflare Workers AI
     // -------------------------------------------------------------
-    if (
-      this.cloudflareProvider &&
-      (env.LLM_PROVIDER === "cloudflare" || env.CLOUDFLARE_LORA_NAME)
-    ) {
+    if (this.cloudflareProvider) {
       try {
-        if (process.env.DEBUG_PROVIDERS === "true") {
+        if (
+          process.env.DEBUG_PROVIDERS === "true" ||
+          process.env.NODE_ENV !== "production"
+        ) {
           console.log(
-            "⚡ [Tier 1: Cloudflare LoRA] Generating step with custom model...",
+            "⚡ [Primary: Cloudflare LoRA] Generating step with custom model...",
           );
         }
         const cfResult = await this.cloudflareProvider.generateStep(
@@ -67,33 +67,23 @@ export class ModelFirstProvider implements LLMProvider {
         }
       } catch (cfErr: any) {
         console.warn(
-          `⚠️ [Tier 1: Cloudflare LoRA] Failed: ${cfErr.message}. Escalating to Tier 2 Gemini Candidates...`,
+          `⚠️ [Primary: Cloudflare LoRA] Failed (${cfErr.message}). Escalating to Gemini fallback...`,
         );
       }
+    } else if (process.env.DEBUG_PROVIDERS === "true") {
+      console.warn(
+        "ℹ️ Cloudflare credentials missing. Routing directly to Gemini fallback.",
+      );
     }
 
     // -------------------------------------------------------------
-    // Tier 2: Gemini Model-First Candidates & 34-Key Matrix Progression
+    // Fallback: Gemini Candidate Pool & Key Matrix
     // -------------------------------------------------------------
-    try {
-      return await this.geminiProvider.generateStep(
-        messages,
-        tools,
-        systemInstruction,
-      );
-    } catch (geminiErr: any) {
-      if (this.cloudflareProvider) {
-        console.warn(
-          `⚡ Gemini candidate pool exhausted (${geminiErr.message}). Seamlessly falling back to Cloudflare Workers AI...`,
-        );
-        return await this.cloudflareProvider.generateStep(
-          messages,
-          tools,
-          systemInstruction,
-        );
-      }
-      throw geminiErr;
-    }
+    return await this.geminiProvider.generateStep(
+      messages,
+      tools,
+      systemInstruction,
+    );
   }
 
   async streamFinalAnswer(
@@ -101,10 +91,10 @@ export class ModelFirstProvider implements LLMProvider {
     systemInstruction: string,
     onToken: (token: string) => void,
   ): Promise<{ fullText: string; tokensUsed: number }> {
-    if (
-      this.cloudflareProvider &&
-      (env.LLM_PROVIDER === "cloudflare" || env.CLOUDFLARE_LORA_NAME)
-    ) {
+    // -------------------------------------------------------------
+    // Primary: Custom Fine-Tuned LoRA Stream on Cloudflare Workers AI
+    // -------------------------------------------------------------
+    if (this.cloudflareProvider) {
       try {
         return await this.cloudflareProvider.streamFinalAnswer(
           messages,
@@ -112,32 +102,19 @@ export class ModelFirstProvider implements LLMProvider {
           onToken,
         );
       } catch (cfErr: any) {
-        if (process.env.DEBUG_PROVIDERS === "true") {
-          console.warn(
-            `⚠️ Cloudflare stream failed: ${cfErr.message}. Escalating to Gemini Model-First...`,
-          );
-        }
+        console.warn(
+          `⚠️ [Primary: Cloudflare LoRA Stream] Failed (${cfErr.message}). Falling back to Gemini stream...`,
+        );
       }
     }
 
-    try {
-      return await this.geminiProvider.streamFinalAnswer(
-        messages,
-        systemInstruction,
-        onToken,
-      );
-    } catch (geminiErr: any) {
-      if (this.cloudflareProvider) {
-        console.warn(
-          `⚡ Gemini stream exhausted (${geminiErr.message}). Seamlessly falling back to Cloudflare Workers AI stream...`,
-        );
-        return await this.cloudflareProvider.streamFinalAnswer(
-          messages,
-          systemInstruction,
-          onToken,
-        );
-      }
-      throw geminiErr;
-    }
+    // -------------------------------------------------------------
+    // Fallback: Gemini Stream
+    // -------------------------------------------------------------
+    return await this.geminiProvider.streamFinalAnswer(
+      messages,
+      systemInstruction,
+      onToken,
+    );
   }
 }

@@ -19,7 +19,7 @@
 - **Backend**: Fastify v5 running on Node.js 20+ / TypeScript, optimized for Google Cloud Run container deployment.
 - **Database**: Neon Serverless PostgreSQL with `pgvector` extension for semantic document retrieval and conversational memory.
 - **Cache & Ephemeral State**: Redis hosted on Oracle Cloud Always-Free VM.
-- **AI Model Orchestration**: Primary Google Gemini 2.5 (`@google/genai`) with automated fallback to Cloudflare Workers AI fine-tuned LoRA models (`@cf/meta/llama-3.1-8b-instruct-fast`).
+- **AI Model Orchestration**: Primary Cloudflare Workers AI fine-tuned LoRA models (`@cf/meta/llama-3.1-8b-instruct`) with automated fallback to Google Gemini 2.5 (`@google/genai`).
 
 ## 4. Zero-Cost & Financial Guardrails
 
