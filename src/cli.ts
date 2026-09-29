@@ -318,7 +318,7 @@ export async function runCli(): Promise<void> {
     // 1. Check AI Provider credentials for local execution
     const hasKey = Boolean(
       env.GEMINI_API_KEY ||
-        (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
+      (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
     );
 
     if (!hasKey) {
@@ -329,31 +329,35 @@ export async function runCli(): Promise<void> {
         console.log(
           `Get a free Gemini API key at: \x1b[4mhttps://aistudio.google.com/app/apikey\x1b[0m\n`,
         );
-        rl.question("\x1b[33mEnter GEMINI_API_KEY:\x1b[0m ", async (inputKey) => {
-          const key = (inputKey || "").trim();
-          if (key) {
-            process.env.GEMINI_API_KEY = key;
-            try {
-              const configDir = path.join(os.homedir(), ".sagentic");
-              if (!fsSync.existsSync(configDir)) {
-                fsSync.mkdirSync(configDir, { recursive: true });
-              }
-              fsSync.appendFileSync(
-                path.join(configDir, ".env"),
-                `GEMINI_API_KEY=${key}\n`,
-                "utf8",
-              );
-              console.log(`\x1b[32m✔ Saved key to ~/.sagentic/.env\x1b[0m\n`);
-            } catch {}
-            reloadEnv();
-            const { GeminiKeyRotator } = await import("./providers/key-rotator.js");
-            GeminiKeyRotator.getInstance().reloadKeys();
-          } else {
-            console.log(`\x1b[31m✖ No API key provided. Exiting.\x1b[0m\n`);
-            process.exit(1);
-          }
-          resolve();
-        });
+        rl.question(
+          "\x1b[33mEnter GEMINI_API_KEY:\x1b[0m ",
+          async (inputKey) => {
+            const key = (inputKey || "").trim();
+            if (key) {
+              process.env.GEMINI_API_KEY = key;
+              try {
+                const configDir = path.join(os.homedir(), ".sagentic");
+                if (!fsSync.existsSync(configDir)) {
+                  fsSync.mkdirSync(configDir, { recursive: true });
+                }
+                fsSync.appendFileSync(
+                  path.join(configDir, ".env"),
+                  `GEMINI_API_KEY=${key}\n`,
+                  "utf8",
+                );
+                console.log(`\x1b[32m✔ Saved key to ~/.sagentic/.env\x1b[0m\n`);
+              } catch {}
+              reloadEnv();
+              const { GeminiKeyRotator } =
+                await import("./providers/key-rotator.js");
+              GeminiKeyRotator.getInstance().reloadKeys();
+            } else {
+              console.log(`\x1b[31m✖ No API key provided. Exiting.\x1b[0m\n`);
+              process.exit(1);
+            }
+            resolve();
+          },
+        );
       });
     }
 
@@ -368,11 +372,11 @@ export async function runCli(): Promise<void> {
       ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
       : "Base 8B";
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.3 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.4 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   } else {
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.3 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.4 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   }
 
@@ -446,7 +450,9 @@ export async function runCli(): Promise<void> {
         if (sessionHistory.length === 0) {
           console.log("\x1b[33mNo conversation history to share yet.\x1b[0m\n");
         } else {
-          const modeLabel = isLocalMode ? "Local Engine" : "Cloud Run Autonomous";
+          const modeLabel = isLocalMode
+            ? "Local Engine"
+            : "Cloud Run Autonomous";
           const filePath = await createShareFile(
             sessionId,
             sessionHistory,
