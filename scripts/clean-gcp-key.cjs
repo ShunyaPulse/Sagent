@@ -15,7 +15,7 @@ function universalKeyExtract(str) {
   // 2. Find the Base64 key payload (RSA starts with MII, EC with MIG, Ed25519 with MC4)
   const keyMatch = cleaned.match(/(?:MII|MIG|MC4)[A-Za-z0-9+/=]{100,}/);
   if (!keyMatch) {
-    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII, MIG, or MC4). Key raw length: ' + str.length);
+    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII, MIG, or MC4). Key raw length: ' + str.length + ', content: ' + JSON.stringify(str));
   }
 
   const base64Body = keyMatch[0].replace(/[^A-Za-z0-9+/=]/g, '');
