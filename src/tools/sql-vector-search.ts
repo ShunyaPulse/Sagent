@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentTool } from "../core/types.js";
 import { query } from "../db/postgres.js";
 import { getEmbeddingProvider } from "../providers/index.js";
+import { env } from "../config/env.js";
 
 const sqlVectorSearchSchema = z
   .object({
@@ -26,6 +27,15 @@ export const sqlVectorSearchTool: AgentTool<typeof sqlVectorSearchSchema> = {
     "Performs semantic vector search across Neon PostgreSQL knowledge base (pgvector) to find relevant documents, policies, or facts.",
   parameters: sqlVectorSearchSchema,
   execute: async ({ searchQuery, limit, minSimilarity }, context) => {
+    if (!env.DATABASE_URL) {
+      return {
+        message:
+          "Vector search unavailable: DATABASE_URL is not configured for knowledge base.",
+        resultsCount: 0,
+        matches: [],
+      };
+    }
+
     // 1. Generate 768-dim embedding for search query
     const embeddingProvider = getEmbeddingProvider();
     const queryVector = await embeddingProvider.embed(searchQuery);

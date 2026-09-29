@@ -37,7 +37,10 @@ export const webhookDispatcherTool: AgentTool<typeof webhookSchema> = {
       data: payload,
     });
 
-    const hmac = crypto.createHmac("sha256", env.AUTH_SECRET);
+    const hmac = crypto.createHmac(
+      "sha256",
+      env.AUTH_SECRET || "sagentic-local-webhook-signing-secret",
+    );
     hmac.update(`${timestamp}.${bodyString}`);
     const signature = hmac.digest("hex");
 

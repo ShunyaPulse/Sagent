@@ -11,6 +11,17 @@ import { knowledgeRoutes } from "./routes/knowledge.js";
 import { sessionRoutes } from "./routes/sessions.js";
 
 export async function buildServer() {
+  if (!env.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is required to run the Sagentic HTTP backend server.",
+    );
+  }
+  if (!env.AUTH_SECRET) {
+    throw new Error(
+      "AUTH_SECRET (min 16 chars) is required to run the Sagentic HTTP backend server.",
+    );
+  }
+
   const server = Fastify({
     logger:
       env.NODE_ENV === "development" ? { level: "info" } : { level: "warn" },
@@ -83,7 +94,9 @@ async function start() {
     console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
     try {
       await server.close();
-      await pool.end();
+      if (pool) {
+        await pool.end();
+      }
       if (redisClient && redisClient.status === "ready") {
         await redisClient.quit();
       }

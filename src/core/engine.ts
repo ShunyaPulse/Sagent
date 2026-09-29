@@ -22,6 +22,7 @@ export interface ExecuteOptions {
 
 export class AgentEngine {
   private registry: ToolRegistry;
+  private static inMemorySessions = new Map<string, Message[]>();
 
   constructor(registry?: ToolRegistry) {
     this.registry = registry || new ToolRegistry();
@@ -44,35 +45,41 @@ export class AgentEngine {
     };
 
     try {
-      // 1. Ensure Session exists in PostgreSQL
-      await query(
-        `INSERT INTO agent_sessions (id, tenant_id, title)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
-        [
-          context.sessionId,
-          context.tenantId || "default",
-          userMessage.slice(0, 50),
-        ],
-      );
+      // 1. Ensure Session exists in PostgreSQL if configured
+      if (env.DATABASE_URL) {
+        await query(
+          `INSERT INTO agent_sessions (id, tenant_id, title)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
+          [
+            context.sessionId,
+            context.tenantId || "default",
+            userMessage.slice(0, 50),
+          ],
+        );
+      }
 
       // 2. Fetch Short-Term Memory (Last 10 messages for conversation context)
-      const historyRows = await query(
-        `SELECT role, content, tool_calls, tool_results
-         FROM agent_messages
-         WHERE session_id = $1
-         ORDER BY created_at DESC
-         LIMIT 10`,
-        [context.sessionId],
-      );
-
-      // Reconstruct chronological message history from past turns
-      const messages: Message[] = [...historyRows.rows]
-        .reverse()
-        .map((row) => ({
-          role: row.role,
-          content: row.content,
-        }));
+      let messages: Message[] = [];
+      if (env.DATABASE_URL) {
+        const historyRows = await query(
+          `SELECT role, content, tool_calls, tool_results
+           FROM agent_messages
+           WHERE session_id = $1
+           ORDER BY created_at DESC
+           LIMIT 10`,
+          [context.sessionId],
+        );
+        messages = [...historyRows.rows]
+          .reverse()
+          .map((row) => ({
+            role: row.role,
+            content: row.content,
+          }));
+      } else {
+        const mem = AgentEngine.inMemorySessions.get(context.sessionId) || [];
+        messages = [...mem.slice(-10)];
+      }
 
       // Append current user message with injection defense delimiters
       const formattedInput = formatUserMessageWithDelimiters(userMessage);
@@ -81,12 +88,18 @@ export class AgentEngine {
         content: formattedInput,
       });
 
-      // Save user message to database
-      await query(
-        `INSERT INTO agent_messages (session_id, role, content)
-         VALUES ($1, 'user', $2)`,
-        [context.sessionId, userMessage],
-      );
+      // Save user message to database or in-memory session
+      if (env.DATABASE_URL) {
+        await query(
+          `INSERT INTO agent_messages (session_id, role, content)
+           VALUES ($1, 'user', $2)`,
+          [context.sessionId, userMessage],
+        );
+      } else {
+        const mem = AgentEngine.inMemorySessions.get(context.sessionId) || [];
+        mem.push({ role: "user", content: userMessage });
+        AgentEngine.inMemorySessions.set(context.sessionId, mem);
+      }
 
       let finalAnswer: string | undefined;
       const allToolCallsExecuted: any[] = [];
@@ -255,19 +268,25 @@ export class AgentEngine {
 
       const totalLatency = Date.now() - startTime;
 
-      // 5. Persist Assistant Response & Metrics to Neon DB
-      await query(
-        `INSERT INTO agent_messages (session_id, role, content, tool_calls, tool_results, tokens_used, latency_ms)
-         VALUES ($1, 'model', $2, $3, $4, $5, $6)`,
-        [
-          context.sessionId,
-          finalAnswerStr,
-          JSON.stringify(allToolCallsExecuted),
-          JSON.stringify(allToolResultsRecorded),
-          totalTokens,
-          totalLatency,
-        ],
-      );
+      // 5. Persist Assistant Response & Metrics to Neon DB or in-memory session
+      if (env.DATABASE_URL) {
+        await query(
+          `INSERT INTO agent_messages (session_id, role, content, tool_calls, tool_results, tokens_used, latency_ms)
+           VALUES ($1, 'model', $2, $3, $4, $5, $6)`,
+          [
+            context.sessionId,
+            finalAnswerStr,
+            JSON.stringify(allToolCallsExecuted),
+            JSON.stringify(allToolResultsRecorded),
+            totalTokens,
+            totalLatency,
+          ],
+        );
+      } else {
+        const mem = AgentEngine.inMemorySessions.get(context.sessionId) || [];
+        mem.push({ role: "model", content: finalAnswerStr });
+        AgentEngine.inMemorySessions.set(context.sessionId, mem);
+      }
 
       emit({
         type: "done",

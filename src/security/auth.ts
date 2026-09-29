@@ -37,6 +37,7 @@ export async function verifyOriginShield(
 
   if (
     !originSecretHeader ||
+    !env.ORIGIN_SECRET ||
     !safeEqual(originSecretHeader, env.ORIGIN_SECRET)
   ) {
     reply.status(403).send({
@@ -71,7 +72,9 @@ export async function verifyApiKey(req: FastifyRequest, reply: FastifyReply) {
     return reply;
   }
 
-  const matchesAuthSecret = safeEqual(token, env.AUTH_SECRET);
+  const matchesAuthSecret = env.AUTH_SECRET
+    ? safeEqual(token, env.AUTH_SECRET)
+    : false;
   const matchesApiSecret = process.env.API_SECRET
     ? safeEqual(token, process.env.API_SECRET)
     : false;

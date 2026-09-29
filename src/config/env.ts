@@ -1,7 +1,19 @@
 import { z } from "zod";
 import dotenv from "dotenv";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
 
+// 1. Load current working directory .env
 dotenv.config();
+
+// 2. Load global user config from ~/.sagentic/.env if present
+try {
+  const globalEnvPath = path.join(os.homedir(), ".sagentic", ".env");
+  if (fs.existsSync(globalEnvPath)) {
+    dotenv.config({ path: globalEnvPath, override: false });
+  }
+} catch {}
 
 const envSchema = z.object({
   PORT: z.coerce.number().default(8080),
@@ -10,22 +22,22 @@ const envSchema = z.object({
     .enum(["development", "production", "test"])
     .default("development"),
 
-  // Database & Cache
-  DATABASE_URL: z
-    .string()
-    .min(1, "DATABASE_URL is required for Neon PostgreSQL"),
+  // Database & Cache (Optional for standalone CLI; required for HTTP Cloud Run backend)
+  DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().optional(),
 
-  // Security
+  // Security (Required for HTTP Cloud Run backend authentication)
   AUTH_SECRET: z
     .string()
-    .min(16, "AUTH_SECRET must be at least 16 characters for security"),
+    .min(16, "AUTH_SECRET must be at least 16 characters for security")
+    .optional(),
   ORIGIN_SECRET: z
     .string()
     .min(
       16,
       "ORIGIN_SECRET must be at least 16 characters for origin shielding",
-    ),
+    )
+    .optional(),
   ENABLE_ORIGIN_SHIELDING: z
     .preprocess(
       (val) => val === true || val === "true" || val === "1",
@@ -60,14 +72,29 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
-function loadEnv(): Env {
+let cachedEnv: Env | null = null;
+
+export function loadEnv(): Env {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     console.error("❌ Invalid Environment Variables Configuration:");
     console.error(JSON.stringify(result.error.format(), null, 2));
     process.exit(1);
   }
-  return result.data;
+  cachedEnv = result.data;
+  return cachedEnv;
 }
 
-export const env = loadEnv();
+export function reloadEnv(): Env {
+  cachedEnv = null;
+  return loadEnv();
+}
+
+export const env: Env = new Proxy({} as Env, {
+  get(_target, prop: string | symbol) {
+    if (!cachedEnv) {
+      cachedEnv = loadEnv();
+    }
+    return (cachedEnv as any)[prop];
+  },
+});

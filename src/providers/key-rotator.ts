@@ -29,14 +29,20 @@ export class GeminiKeyRotator {
   private currentKeyIndex = 0;
 
   private constructor() {
-    const rawKeys = env.GEMINI_API_KEY || "";
+    this.reloadKeys();
+  }
+
+  public reloadKeys(): void {
+    const rawKeys = env.GEMINI_API_KEY || process.env.GEMINI_API_KEY || "";
     this.keys = rawKeys
       .split(",")
       .map((k) => k.trim().replace(/^["']|["']$/g, ""))
       .filter((k) => k.length > 0);
 
     if (this.keys.length === 0) {
-      console.warn("⚠️ No Gemini API keys found in GEMINI_API_KEY.");
+      if (process.env.DEBUG_ROTATOR === "true") {
+        console.warn("⚠️ No Gemini API keys found in GEMINI_API_KEY.");
+      }
     } else if (process.env.DEBUG_ROTATOR === "true") {
       console.log(
         `🔑 Loaded ${this.keys.length} Gemini API Key(s) for Model-First Exhaustive Rotation.`,

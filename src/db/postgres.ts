@@ -21,22 +21,35 @@ const normalizedDbUrl = env.DATABASE_URL
     )
   : undefined;
 
-export const pool = new Pool({
-  connectionString: normalizedDbUrl,
-  ssl: env.NODE_ENV === "production" ? true : undefined,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+export const pool = normalizedDbUrl
+  ? new Pool({
+      connectionString: normalizedDbUrl,
+      ssl: env.NODE_ENV === "production" ? true : undefined,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    })
+  : null;
 
-pool.on("error", (err) => {
-  console.error("❌ Unexpected error on idle Neon PostgreSQL client:", err);
-});
+if (pool) {
+  pool.on("error", (err) => {
+    console.error("❌ Unexpected error on idle Neon PostgreSQL client:", err);
+  });
+}
 
 export async function query<T extends pg.QueryResultRow = any>(
   text: string,
   params?: any[],
 ): Promise<pg.QueryResult<T>> {
+  if (!pool) {
+    return {
+      rows: [],
+      rowCount: 0,
+      command: "",
+      oid: 0,
+      fields: [],
+    };
+  }
   const start = Date.now();
   const res = await pool.query<T>(text, params);
   const duration = Date.now() - start;
@@ -48,6 +61,9 @@ export async function query<T extends pg.QueryResultRow = any>(
 }
 
 export async function checkDbHealth(): Promise<boolean> {
+  if (!pool) {
+    return false;
+  }
   try {
     const res = await pool.query("SELECT 1 as healthy");
     return res.rows[0]?.healthy === 1;

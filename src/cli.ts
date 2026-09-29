@@ -1,10 +1,12 @@
 import readline from "readline";
 import { exec } from "node:child_process";
-import { promises as fs } from "node:fs";
+import fsSync, { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { AgentEngine } from "./core/engine.js";
 import { getLLMProvider } from "./providers/index.js";
-import { env } from "./config/env.js";
+import { GeminiKeyRotator } from "./providers/key-rotator.js";
+import { env, reloadEnv } from "./config/env.js";
 
 // Suppress pg-connection-string security warning
 process.on("warning", (warning) => {
@@ -157,12 +159,58 @@ function displaySources(tools: any[]): void {
 }
 
 export async function runCli(): Promise<void> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  // 1. Check AI Provider credentials
+  const hasKey = Boolean(
+    env.GEMINI_API_KEY ||
+      (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
+  );
+
+  if (!hasKey) {
+    await new Promise<void>((resolve) => {
+      console.log(
+        `\n\x1b[1m\x1b[36mWelcome to Sagentic!\x1b[0m\n\x1b[90mNo AI API Key found in environment.\x1b[0m`,
+      );
+      console.log(
+        `Get a free Gemini API key at: \x1b[4mhttps://aistudio.google.com/app/apikey\x1b[0m\n`,
+      );
+      rl.question("\x1b[33mEnter GEMINI_API_KEY:\x1b[0m ", (inputKey) => {
+        const key = (inputKey || "").trim();
+        if (key) {
+          process.env.GEMINI_API_KEY = key;
+          try {
+            const configDir = path.join(os.homedir(), ".sagentic");
+            if (!fsSync.existsSync(configDir)) {
+              fsSync.mkdirSync(configDir, { recursive: true });
+            }
+            fsSync.appendFileSync(
+              path.join(configDir, ".env"),
+              `GEMINI_API_KEY=${key}\n`,
+              "utf8",
+            );
+            console.log(`\x1b[32m✔ Saved key to ~/.sagentic/.env\x1b[0m\n`);
+          } catch {}
+          reloadEnv();
+          GeminiKeyRotator.getInstance().reloadKeys();
+        } else {
+          console.log(`\x1b[31m✖ No API key provided. Exiting.\x1b[0m\n`);
+          process.exit(1);
+        }
+        resolve();
+      });
+    });
+  }
+
   const loraDisplay = env.CLOUDFLARE_LORA_NAME
     ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
     : "Base 8B";
 
   console.log(
-    `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.1 (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+    `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.2 (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
   );
 
   const engine = new AgentEngine();
@@ -176,18 +224,15 @@ export async function runCli(): Promise<void> {
   let lastAssistantAnswer = "";
   let lastToolExecutions: any[] = [];
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
   let isRunning = false;
 
   const shutdown = async () => {
     console.log("\n\x1b[90mBye!\x1b[0m");
     rl.close();
     try {
-      await pool.end();
+      if (pool) {
+        await pool.end();
+      }
     } catch {}
     process.exit(0);
   };

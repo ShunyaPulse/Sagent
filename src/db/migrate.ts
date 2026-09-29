@@ -17,6 +17,11 @@ async function runMigrations() {
     process.exit(1);
   }
 
+  if (!pool) {
+    console.error("❌ DATABASE_URL must be defined to run database migrations.");
+    process.exit(1);
+  }
+
   const sql = fs.readFileSync(schemaPath, "utf-8");
   const client = await pool.connect();
 
