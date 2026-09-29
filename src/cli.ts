@@ -3,9 +3,6 @@ import { exec } from "node:child_process";
 import fsSync, { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AgentEngine } from "./core/engine.js";
-import { getLLMProvider } from "./providers/index.js";
-import { GeminiKeyRotator } from "./providers/key-rotator.js";
 import { env, reloadEnv } from "./config/env.js";
 
 // Suppress pg-connection-string security warning
@@ -19,7 +16,8 @@ process.on("warning", (warning) => {
   console.warn(warning);
 });
 
-import { pool } from "./db/postgres.js";
+const DEFAULT_REMOTE_ENDPOINT =
+  "https://sagentic-ohyotaaora-el.a.run.app/api/v1/agent/chat";
 
 function formatToolCallInfo(tool: string, args: Record<string, any>): string {
   if (!args) return "";
@@ -97,6 +95,7 @@ interface ConversationTurn {
 async function createShareFile(
   sessionId: string,
   history: ConversationTurn[],
+  mode: string,
 ): Promise<string> {
   const scratchDir = path.resolve(process.cwd(), "scratch");
   await fs.mkdir(scratchDir, { recursive: true });
@@ -107,7 +106,7 @@ async function createShareFile(
 - **Session ID**: \`${sessionId}\`
 - **Exported At**: ${new Date().toISOString()}
 - **Total Exchanges**: ${history.length}
-- **Model Architecture**: Tier 1 (${env.CLOUDFLARE_LORA_NAME || "Llama 3.1 8B"}) ➔ Tier 2 (Gemini Pool)
+- **Mode**: ${mode}
 
 ---
 `;
@@ -158,63 +157,225 @@ function displaySources(tools: any[]): void {
   console.log("");
 }
 
+interface StreamState {
+  debugMode: boolean;
+  hasStreamedFirstToken: boolean;
+  hadToolCalls: boolean;
+  currentAnswer: string;
+  currentTools: any[];
+}
+
+function handleStreamEvent(event: any, state: StreamState) {
+  if (event.type === "thought") {
+    if (
+      event.thought &&
+      event.thought !== "Direct response generated" &&
+      (state.debugMode || process.env.DEBUG_THOUGHTS === "true")
+    ) {
+      console.log(`\x1b[90m● Thought: ${event.thought}\x1b[0m`);
+    }
+  } else if (event.type === "tool_call") {
+    state.hadToolCalls = true;
+    state.currentTools.push({
+      tool: event.tool,
+      args: event.args,
+    });
+    const details = formatToolCallInfo(event.tool, event.args);
+    console.log(
+      `\x1b[34m●\x1b[0m \x1b[1m${event.tool}\x1b[0m\x1b[90m(${details})\x1b[0m`,
+    );
+  } else if (event.type === "tool_result") {
+    const last = state.currentTools[state.currentTools.length - 1];
+    if (last && last.tool === event.tool) {
+      last.result = event.result;
+      last.durationMs = event.durationMs;
+      last.isError = event.isError;
+    }
+    if (event.isError) {
+      console.log(
+        `  \x1b[90m└─\x1b[0m \x1b[31m✖ Error\x1b[0m \x1b[90m(${event.durationMs}ms)\x1b[0m`,
+      );
+    } else {
+      console.log(
+        `  \x1b[90m└─\x1b[0m \x1b[32m✔ Done\x1b[0m \x1b[90m(${event.durationMs}ms)\x1b[0m`,
+      );
+    }
+    if (state.debugMode && event.result) {
+      console.log(
+        `     \x1b[90m${JSON.stringify(event.result).slice(0, 120)}...\x1b[0m`,
+      );
+    }
+  } else if (event.type === "token") {
+    state.currentAnswer += event.text;
+    if (!state.hasStreamedFirstToken) {
+      state.hasStreamedFirstToken = true;
+      if (state.hadToolCalls) {
+        process.stdout.write("\n");
+      }
+    }
+    process.stdout.write(event.text);
+  } else if (event.type === "done") {
+    console.log("\n");
+    if (state.debugMode || process.env.DEBUG_METRICS === "true") {
+      console.log(
+        `\x1b[90m[${event.latencyMs}ms | ${event.totalTokens} tokens]\x1b[0m\n`,
+      );
+    }
+  } else if (event.type === "error") {
+    console.error(`\x1b[31m✖ Error: ${event.message}\x1b[0m\n`);
+  }
+}
+
+async function runRemoteStream(
+  remoteUrl: string,
+  sessionId: string,
+  userMessage: string,
+  state: StreamState,
+  abortSignal: AbortSignal,
+): Promise<{ latencyMs?: number; totalTokens?: number }> {
+  const token =
+    process.env.SAGENTIC_API_KEY ||
+    process.env.AUTH_SECRET ||
+    process.env.API_SECRET ||
+    env.AUTH_SECRET;
+
+  const response = await fetch(remoteUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      sessionId,
+      tenantId: "default",
+      message: userMessage,
+      stream: true,
+    }),
+    signal: abortSignal,
+  });
+
+  if (!response.ok) {
+    let errMsg = `HTTP ${response.status} ${response.statusText}`;
+    try {
+      const errJson = (await response.json()) as any;
+      if (errJson && errJson.message) errMsg = errJson.message;
+    } catch {}
+    throw new Error(errMsg);
+  }
+
+  if (!response.body) {
+    throw new Error("No response body received from server.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let doneEventData: any = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "done") {
+            doneEventData = event;
+          }
+          handleStreamEvent(event, state);
+        } catch {}
+      }
+    }
+  }
+
+  return doneEventData || {};
+}
+
 export async function runCli(): Promise<void> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
-  // 1. Check AI Provider credentials
-  const hasKey = Boolean(
-    env.GEMINI_API_KEY ||
-      (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
-  );
+  const isLocalMode =
+    process.argv.includes("--local") ||
+    process.env.SAGENTIC_LOCAL === "true" ||
+    process.env.SAGENTIC_MODE === "local";
 
-  if (!hasKey) {
-    await new Promise<void>((resolve) => {
-      console.log(
-        `\n\x1b[1m\x1b[36mWelcome to Sagentic!\x1b[0m\n\x1b[90mNo AI API Key found in environment.\x1b[0m`,
-      );
-      console.log(
-        `Get a free Gemini API key at: \x1b[4mhttps://aistudio.google.com/app/apikey\x1b[0m\n`,
-      );
-      rl.question("\x1b[33mEnter GEMINI_API_KEY:\x1b[0m ", (inputKey) => {
-        const key = (inputKey || "").trim();
-        if (key) {
-          process.env.GEMINI_API_KEY = key;
-          try {
-            const configDir = path.join(os.homedir(), ".sagentic");
-            if (!fsSync.existsSync(configDir)) {
-              fsSync.mkdirSync(configDir, { recursive: true });
-            }
-            fsSync.appendFileSync(
-              path.join(configDir, ".env"),
-              `GEMINI_API_KEY=${key}\n`,
-              "utf8",
-            );
-            console.log(`\x1b[32m✔ Saved key to ~/.sagentic/.env\x1b[0m\n`);
-          } catch {}
-          reloadEnv();
-          GeminiKeyRotator.getInstance().reloadKeys();
-        } else {
-          console.log(`\x1b[31m✖ No API key provided. Exiting.\x1b[0m\n`);
-          process.exit(1);
-        }
-        resolve();
+  const remoteEndpoint =
+    process.env.SAGENTIC_API_URL || DEFAULT_REMOTE_ENDPOINT;
+
+  let engine: any = null;
+  let provider: any = null;
+  let poolModule: any = null;
+
+  if (isLocalMode) {
+    // 1. Check AI Provider credentials for local execution
+    const hasKey = Boolean(
+      env.GEMINI_API_KEY ||
+        (env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
+    );
+
+    if (!hasKey) {
+      await new Promise<void>((resolve) => {
+        console.log(
+          `\n\x1b[1m\x1b[36mWelcome to Sagentic (Local Mode)!\x1b[0m\n\x1b[90mNo AI API Key found in environment.\x1b[0m`,
+        );
+        console.log(
+          `Get a free Gemini API key at: \x1b[4mhttps://aistudio.google.com/app/apikey\x1b[0m\n`,
+        );
+        rl.question("\x1b[33mEnter GEMINI_API_KEY:\x1b[0m ", async (inputKey) => {
+          const key = (inputKey || "").trim();
+          if (key) {
+            process.env.GEMINI_API_KEY = key;
+            try {
+              const configDir = path.join(os.homedir(), ".sagentic");
+              if (!fsSync.existsSync(configDir)) {
+                fsSync.mkdirSync(configDir, { recursive: true });
+              }
+              fsSync.appendFileSync(
+                path.join(configDir, ".env"),
+                `GEMINI_API_KEY=${key}\n`,
+                "utf8",
+              );
+              console.log(`\x1b[32m✔ Saved key to ~/.sagentic/.env\x1b[0m\n`);
+            } catch {}
+            reloadEnv();
+            const { GeminiKeyRotator } = await import("./providers/key-rotator.js");
+            GeminiKeyRotator.getInstance().reloadKeys();
+          } else {
+            console.log(`\x1b[31m✖ No API key provided. Exiting.\x1b[0m\n`);
+            process.exit(1);
+          }
+          resolve();
+        });
       });
-    });
+    }
+
+    const { AgentEngine } = await import("./core/engine.js");
+    const { getLLMProvider } = await import("./providers/index.js");
+    const { pool } = await import("./db/postgres.js");
+    engine = new AgentEngine();
+    provider = getLLMProvider();
+    poolModule = pool;
+
+    const loraDisplay = env.CLOUDFLARE_LORA_NAME
+      ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
+      : "Base 8B";
+    console.log(
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.3 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+    );
+  } else {
+    console.log(
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.3 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+    );
   }
 
-  const loraDisplay = env.CLOUDFLARE_LORA_NAME
-    ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
-    : "Base 8B";
-
-  console.log(
-    `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.2 (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
-  );
-
-  const engine = new AgentEngine();
-  const provider = getLLMProvider();
   let sessionId = `cli_${Date.now()}`;
   const tenantId = "default";
   let debugMode = false;
@@ -225,13 +386,14 @@ export async function runCli(): Promise<void> {
   let lastToolExecutions: any[] = [];
 
   let isRunning = false;
+  let activeAbortController: AbortController | null = null;
 
   const shutdown = async () => {
     console.log("\n\x1b[90mBye!\x1b[0m");
     rl.close();
     try {
-      if (pool) {
-        await pool.end();
+      if (poolModule) {
+        await poolModule.end();
       }
     } catch {}
     process.exit(0);
@@ -240,6 +402,10 @@ export async function runCli(): Promise<void> {
   rl.on("SIGINT", async () => {
     if (isRunning) {
       console.log("\n\x1b[33m▲ Interrupted current reasoning turn.\x1b[0m");
+      if (activeAbortController) {
+        activeAbortController.abort();
+        activeAbortController = null;
+      }
       isRunning = false;
       ask();
       return;
@@ -280,7 +446,12 @@ export async function runCli(): Promise<void> {
         if (sessionHistory.length === 0) {
           console.log("\x1b[33mNo conversation history to share yet.\x1b[0m\n");
         } else {
-          const filePath = await createShareFile(sessionId, sessionHistory);
+          const modeLabel = isLocalMode ? "Local Engine" : "Cloud Run Autonomous";
+          const filePath = await createShareFile(
+            sessionId,
+            sessionHistory,
+            modeLabel,
+          );
           console.log(
             `\x1b[35m✔ Exported full conversation (${sessionHistory.length} turns) to ${filePath} and copied to clipboard.\x1b[0m\n`,
           );
@@ -323,6 +494,8 @@ export async function runCli(): Promise<void> {
   \x1b[36m/debug\x1b[0m         Toggle debug logs (current: ${debugMode ? "ON" : "OFF"})
   \x1b[36m/help\x1b[0m          Show this help menu
   \x1b[36mexit\x1b[0m           Quit session
+
+\x1b[90mTip: Run with --local to use your own local API keys and offline engine.\x1b[0m
 `);
         ask();
         return;
@@ -334,95 +507,56 @@ export async function runCli(): Promise<void> {
       }
 
       isRunning = true;
-      let hasStreamedFirstToken = false;
-      let currentAnswer = "";
-      const currentTools: any[] = [];
-      let hadToolCalls = false;
+      const state: StreamState = {
+        debugMode,
+        hasStreamedFirstToken: false,
+        hadToolCalls: false,
+        currentAnswer: "",
+        currentTools: [],
+      };
+
+      activeAbortController = new AbortController();
 
       try {
-        await engine.run({
-          context: { sessionId, tenantId, userIp: "127.0.0.1" },
-          userMessage: trimmed,
-          provider,
-          onEvent: (event) => {
-            if (event.type === "thought") {
-              if (
-                event.thought &&
-                event.thought !== "Direct response generated" &&
-                (debugMode || process.env.DEBUG_THOUGHTS === "true")
-              ) {
-                console.log(`\x1b[90m● Thought: ${event.thought}\x1b[0m`);
-              }
-            } else if (event.type === "tool_call") {
-              hadToolCalls = true;
-              currentTools.push({
-                tool: event.tool,
-                args: event.args,
-              });
-              const details = formatToolCallInfo(event.tool, event.args);
-              console.log(
-                `\x1b[34m●\x1b[0m \x1b[1m${event.tool}\x1b[0m\x1b[90m(${details})\x1b[0m`,
-              );
-            } else if (event.type === "tool_result") {
-              const last = currentTools[currentTools.length - 1];
-              if (last && last.tool === event.tool) {
-                last.result = event.result;
-                last.durationMs = event.durationMs;
-                last.isError = event.isError;
-              }
-              if (event.isError) {
-                console.log(
-                  `  \x1b[90m└─\x1b[0m \x1b[31m✖ Error\x1b[0m \x1b[90m(${event.durationMs}ms)\x1b[0m`,
-                );
-              } else {
-                console.log(
-                  `  \x1b[90m└─\x1b[0m \x1b[32m✔ Done\x1b[0m \x1b[90m(${event.durationMs}ms)\x1b[0m`,
-                );
-              }
-              if (debugMode && event.result) {
-                console.log(
-                  `     \x1b[90m${JSON.stringify(event.result).slice(0, 120)}...\x1b[0m`,
-                );
-              }
-            } else if (event.type === "token") {
-              currentAnswer += event.text;
-              if (!hasStreamedFirstToken) {
-                hasStreamedFirstToken = true;
-                if (hadToolCalls) {
-                  process.stdout.write("\n");
-                }
-              }
-              process.stdout.write(event.text);
-            } else if (event.type === "done") {
-              lastAssistantAnswer = currentAnswer;
-              lastToolExecutions = [...currentTools];
-              lastUserMessage = trimmed;
-              sessionHistory.push({
-                userMessage: trimmed,
-                assistantAnswer: currentAnswer,
-                timestamp: new Date().toISOString(),
-                tools: [...currentTools],
-              });
+        if (isLocalMode) {
+          await engine.run({
+            context: { sessionId, tenantId, userIp: "127.0.0.1" },
+            userMessage: trimmed,
+            provider,
+            onEvent: (event: any) => handleStreamEvent(event, state),
+          });
+        } else {
+          await runRemoteStream(
+            remoteEndpoint,
+            sessionId,
+            trimmed,
+            state,
+            activeAbortController.signal,
+          );
+        }
 
-              console.log("\n");
-              if (debugMode || process.env.DEBUG_METRICS === "true") {
-                console.log(
-                  `\x1b[90m[${event.latencyMs}ms | ${event.totalTokens} tokens]\x1b[0m\n`,
-                );
-              }
-            } else if (event.type === "error") {
-              console.error(`\x1b[31m✖ Error: ${event.message}\x1b[0m\n`);
-            }
-          },
+        lastAssistantAnswer = state.currentAnswer;
+        lastToolExecutions = [...state.currentTools];
+        lastUserMessage = trimmed;
+        sessionHistory.push({
+          userMessage: trimmed,
+          assistantAnswer: state.currentAnswer,
+          timestamp: new Date().toISOString(),
+          tools: [...state.currentTools],
         });
       } catch (err: any) {
-        console.error(
-          "\x1b[31m✖ Error running prompt:\x1b[0m",
-          err.message,
-          "\n",
-        );
+        if (activeAbortController?.signal.aborted) {
+          // aborted by SIGINT
+        } else {
+          console.error(
+            "\x1b[31m✖ Error running prompt:\x1b[0m",
+            err.message,
+            "\n",
+          );
+        }
       } finally {
         isRunning = false;
+        activeAbortController = null;
       }
 
       if (process.stdin.isTTY || !process.stdin.readableEnded) {

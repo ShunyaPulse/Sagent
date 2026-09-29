@@ -90,6 +90,45 @@ export async function verifyApiKey(req: FastifyRequest, reply: FastifyReply) {
 }
 
 /**
+ * Fastify Pre-handler Hook: Verifies Client API Key if present, otherwise permits public access with rate limiting.
+ */
+export async function verifyOptionalApiKey(
+  req: FastifyRequest,
+  reply: FastifyReply,
+) {
+  const authHeader = req.headers.authorization;
+  const xApiKey = req.headers["x-api-key"] as string | undefined;
+
+  let token = "";
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.slice(7).trim();
+  } else if (xApiKey) {
+    token = xApiKey.trim();
+  }
+
+  // If no token is provided, permit public access under IP rate limiter
+  if (!token) {
+    return;
+  }
+
+  const matchesAuthSecret = env.AUTH_SECRET
+    ? safeEqual(token, env.AUTH_SECRET)
+    : false;
+  const matchesApiSecret = process.env.API_SECRET
+    ? safeEqual(token, process.env.API_SECRET)
+    : false;
+
+  if (!matchesAuthSecret && !matchesApiSecret) {
+    reply.status(401).send({
+      statusCode: 401,
+      error: "Unauthorized",
+      message: "Invalid API Key provided.",
+    });
+    return reply;
+  }
+}
+
+/**
  * Verifies Cloudflare Turnstile token if passed in request header 'x-turnstile-token'
  */
 export async function verifyTurnstileToken(

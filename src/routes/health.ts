@@ -154,7 +154,7 @@ const PLAYGROUND_HTML = `<!DOCTYPE html>
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + (window.AUTH_KEY || 'f98a2e1d74c0b642e88a3b5c10928e45a27891234bc567de')
+            ...(window.AUTH_KEY ? { 'Authorization': 'Bearer ' + window.AUTH_KEY } : {})
           },
           body: JSON.stringify({
             sessionId: currentSessionId,

@@ -6,6 +6,7 @@ import { getLLMProvider } from "../providers/index.js";
 import { acquireSessionLock, releaseSessionLock } from "../db/redis.js";
 import {
   verifyApiKey,
+  verifyOptionalApiKey,
   verifyOriginShield,
   verifyTurnstileToken,
 } from "../security/auth.js";
@@ -33,7 +34,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/api/v1/agent/chat",
     {
-      preHandler: [verifyOriginShield, verifyApiKey],
+      preHandler: [verifyOriginShield, verifyOptionalApiKey],
       schema: {
         body: {
           type: "object",
