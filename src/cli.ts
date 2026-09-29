@@ -162,7 +162,7 @@ export async function runCli(): Promise<void> {
     : "Base 8B";
 
   console.log(
-    `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.0 (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+    `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.1 (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
   );
 
   const engine = new AgentEngine();
