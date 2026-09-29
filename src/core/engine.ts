@@ -219,8 +219,36 @@ export class AgentEngine {
         }
       }
 
+      // If the answer contains "Final Answer:", isolate only the real answer intended for the user
+      if (/Final Answer\s*:\s*/i.test(finalAnswerStr)) {
+        const parts = finalAnswerStr.split(/Final Answer\s*:\s*/i);
+        finalAnswerStr = parts[parts.length - 1].trim();
+      }
+
+      // Clean up internal thoughts if leaked into final answer
+      finalAnswerStr = finalAnswerStr
+        .replace(/(?:^|\n+)Thought\s*:\s*[\s\S]*?(?=\n\n|\n[A-Z]|$)/gi, "")
+        .replace(/\bThought:\s*[\s\S]*$/i, "")
+        .trim();
+
+      // Convert literal \n to real newlines if string has unescaped escaped newlines
+      if (finalAnswerStr.includes("\\n") && !finalAnswerStr.includes("\n")) {
+        finalAnswerStr = finalAnswerStr.replace(/\\n/g, "\n");
+      }
+
+      // Ensure clean paragraph separation after bold headers (e.g. "**Header**Body" -> "**Header**\n\nBody")
+      finalAnswerStr = finalAnswerStr.replace(
+        /(\*\*[^\*]+\*\*)([A-Za-z0-9])/g,
+        "$1\n\n$2",
+      );
+
+      // Ensure bulleted list items have clean newlines and proper spacing
+      finalAnswerStr = finalAnswerStr
+        .replace(/([^\n])\s*(\*|-)\s+/g, "$1\n$2 ")
+        .replace(/([^\n])\s*(\*|-)\s*(`)/g, "$1\n$2 $3");
+
       // Stream the answer tokens to the client
-      const chunks = finalAnswerStr.match(/.{1,12}/g) || [finalAnswerStr];
+      const chunks = finalAnswerStr.match(/[\s\S]{1,16}/g) || [finalAnswerStr];
       for (const chunk of chunks) {
         emit({ type: "token", text: chunk });
       }

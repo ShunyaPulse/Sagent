@@ -147,7 +147,7 @@ const directoryListerSchema = z.object({
     .string()
     .default(".")
     .describe("Relative directory path to inspect, e.g. '.' or 'src'"),
-  maxDepth: z.coerce.number().int().min(1).max(3).default(2),
+  maxDepth: z.coerce.number().int().min(1).max(3).default(1),
 });
 
 export const directoryListerTool: AgentTool<typeof directoryListerSchema> = {

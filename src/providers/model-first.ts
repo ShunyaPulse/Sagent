@@ -46,10 +46,7 @@ export class ModelFirstProvider implements LLMProvider {
     // -------------------------------------------------------------
     if (this.cloudflareProvider) {
       try {
-        if (
-          process.env.DEBUG_PROVIDERS === "true" ||
-          process.env.NODE_ENV !== "production"
-        ) {
+        if (process.env.DEBUG_PROVIDERS === "true") {
           console.log(
             "⚡ [Primary: Cloudflare LoRA] Generating step with custom model...",
           );

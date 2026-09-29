@@ -53,23 +53,51 @@ ${systemInstruction}
 Available Tools:
 ${JSON.stringify(toolSpecs, null, 2)}
 
-CRITICAL ACTION RULES:
-- If the user request requires an action (e.g. writing/creating a file, reading a file, searching documents, or calculations), you MUST call the appropriate tool.
-- You CANNOT write or modify files by simply outputting markdown text. You MUST output a tool call for "file_writer".
-- Respond in strict JSON format matching ONE of these two schemas:
+CRITICAL ACTION & FORMAT RULES:
+1. Available tools are action mechanisms, NOT files in the project. If the user asks to see or list files, you MUST invoke "directory_lister" with { "path": "." }. NEVER list tool names as files.
+2. If the user request requires an action (e.g. creating/writing a file, reading a file, searching documents, or calculations), you MUST call the appropriate tool. You CANNOT write or modify files through text alone.
+3. Respond in strict JSON format matching ONE of these schemas:
 
-1. When calling a tool (e.g. to create/write a file):
+When executing a tool:
 {
-  "thought": "Your reasoning why you need this tool",
-  "tool": "name_of_tool",
+  "thought": "Reasoning for invoking this tool",
+  "tool": "tool_name",
   "arguments": { ...tool parameters... }
 }
 
-2. Only when all required actions have been performed and you are answering the user:
+When answering the user after all actions are complete:
 {
-  "thought": "Your internal conclusion",
-  "finalAnswer": "Your complete Markdown answer to the user"
+  "thought": "Internal conclusion",
+  "finalAnswer": "Direct Markdown answer for user"
 }
+
+FEW-SHOT EXAMPLES:
+
+User: "list files" or "what files are here?"
+Response:
+{
+  "thought": "User wants to list workspace files. I will run directory_lister.",
+  "tool": "directory_lister",
+  "arguments": { "path": "." }
+}
+
+User: "write a poem in 'abc' file"
+Response:
+{
+  "thought": "User wants to write a poem into file 'abc'. I must call file_writer with the file content.",
+  "tool": "file_writer",
+  "arguments": { "path": "abc", "content": "..." }
+}
+
+User: "read file abc"
+Response:
+{
+  "thought": "User wants to view file 'abc'. I will use file_reader.",
+  "tool": "file_reader",
+  "arguments": { "path": "abc" }
+}
+
+CRITICAL: In "finalAnswer", NEVER include "Thought:", "Final Answer:", or scratchpad tokens. Provide ONLY the final clean text addressed to the user.
 `;
 
     // Map conversation messages to prompt
