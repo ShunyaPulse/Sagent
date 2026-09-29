@@ -15,7 +15,10 @@ function universalKeyExtract(str) {
   // 2. Find the Base64 key payload (RSA starts with MII, EC with MIG, Ed25519 with MC4)
   const keyMatch = cleaned.match(/(?:MII|MIG|MC4)[A-Za-z0-9+/=]{100,}/);
   if (!keyMatch) {
-    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII, MIG, or MC4). Key raw length: ' + str.length + ', content: ' + JSON.stringify(str));
+    if (str.includes('...') || str.length < 500) {
+      throw new Error('The private_key in your GitHub Secret is truncated or contains literal "..." (length: ' + str.length + '). Please paste the FULL, untruncated JSON key file downloaded from Google Cloud Console into repository secrets (GCP_CREDENTIALS or GCP_SA_KEY).');
+    }
+    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII, MIG, or MC4). Key raw length: ' + str.length);
   }
 
   const base64Body = keyMatch[0].replace(/[^A-Za-z0-9+/=]/g, '');
