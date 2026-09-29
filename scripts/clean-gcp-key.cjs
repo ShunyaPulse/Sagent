@@ -6,24 +6,24 @@ function universalKeyExtract(str) {
     throw new Error('Key must be a non-empty string');
   }
 
-  const isPkcs1 = /RSA PRIVATE KEY/i.test(str);
+  // 1. Remove all whitespace (spaces, tabs, actual newlines), escaped newlines (\n, \r), quotes, and backslashes
+  const cleaned = str
+    .replace(/\s+/g, '')
+    .replace(/\\+[rn]/g, '')
+    .replace(/["'\\]/g, '');
 
-  // 1. Remove all newline representations (both escaped and literal)
-  const strippedBreaks = str.replace(/(?:\\+[rn]|\r?\n)+/g, '');
-
-  // 2. Find the ASN.1 DER Base64 payload (starts with MII, min length 100)
-  const miiMatch = strippedBreaks.match(/MII[A-Za-z0-9+/=]{100,}/);
-  if (!miiMatch) {
-    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII)');
+  // 2. Find the Base64 key payload (RSA starts with MII, EC with MIG, Ed25519 with MC4)
+  const keyMatch = cleaned.match(/(?:MII|MIG|MC4)[A-Za-z0-9+/=]{100,}/);
+  if (!keyMatch) {
+    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII, MIG, or MC4). Key raw length: ' + str.length);
   }
-  const base64Body = miiMatch[0].replace(/[^A-Za-z0-9+/=]/g, '');
+
+  const base64Body = keyMatch[0].replace(/[^A-Za-z0-9+/=]/g, '');
   const wrapped = (base64Body.match(/.{1,64}/g) || []).join('\n');
 
-  const candidates = isPkcs1
-    ? ['RSA PRIVATE KEY', 'PRIVATE KEY']
-    : ['PRIVATE KEY', 'RSA PRIVATE KEY'];
-
-  for (const type of candidates) {
+  // 3. Try standard PKCS#8 first, then PKCS#1 (RSA), then EC
+  const candidateTypes = ['PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY'];
+  for (const type of candidateTypes) {
     const pem = `-----BEGIN ${type}-----\n${wrapped}\n-----END ${type}-----\n`;
     try {
       crypto.createPrivateKey(pem);
@@ -31,7 +31,7 @@ function universalKeyExtract(str) {
     } catch {}
   }
 
-  throw new Error('Failed to validate key with either PKCS#8 or PKCS#1 framing');
+  throw new Error('Failed to validate key with standard OpenSSL decoders');
 }
 
 function main() {
