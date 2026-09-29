@@ -2,9 +2,9 @@ name: Security - Push & PR Guard
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Semgrep Rules
-        run: semgrep scan --config auto --error
+        run: semgrep scan --config auto --error src/
 
   # ----------------------------------------------------------------------------
   # 3. Supply Chain Security (Socket.dev & NPM Audit)
@@ -62,7 +62,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: "npm"
 
       - name: NPM Production Audit
         run: npm audit --omit=dev --audit-level=high

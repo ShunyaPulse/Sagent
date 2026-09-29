@@ -1,0 +1,5 @@
+# Ignore test files, dependencies and build output from Semgrep SAST
+node_modules/
+dist/
+*.test.ts
+*.spec.ts

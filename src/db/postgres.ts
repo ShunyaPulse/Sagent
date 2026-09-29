@@ -23,9 +23,7 @@ const normalizedDbUrl = env.DATABASE_URL
 
 export const pool = new Pool({
   connectionString: normalizedDbUrl,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: env.NODE_ENV === "production" ? true : undefined,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
