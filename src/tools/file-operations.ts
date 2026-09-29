@@ -283,22 +283,35 @@ export const filePatcherTool: AgentTool<typeof filePatcherSchema> = {
   description:
     "Surgically replaces a specific block of text/code in an existing file without rewriting the entire file. Prevents accidental truncation.",
   parameters: filePatcherSchema,
-  execute: async ({
-    path: targetPath,
-    targetContent,
-    replacementContent,
-    allowMultiple,
-  }) => {
+  execute: async (
+    {
+      path: targetPath,
+      targetContent,
+      replacementContent,
+      allowMultiple,
+    },
+    context,
+  ) => {
     try {
       const safePath = resolveSafePath(targetPath);
-      let raw: string;
-      try {
-        raw = await fs.readFile(safePath, "utf-8");
-      } catch {
-        return {
-          error: `File not found at "${targetPath}". Use file_writer if you want to create a new file.`,
-          success: false,
-        };
+      let raw: string = "";
+      if (
+        context?.localFiles &&
+        (context.localFiles[targetPath] ||
+          context.localFiles[path.basename(targetPath)])
+      ) {
+        raw =
+          context.localFiles[targetPath] ||
+          context.localFiles[path.basename(targetPath)];
+      } else {
+        try {
+          raw = await fs.readFile(safePath, "utf-8");
+        } catch {
+          return {
+            error: `File not found at "${targetPath}". Use file_writer if you want to create a new file.`,
+            success: false,
+          };
+        }
       }
 
       if (!targetContent) {

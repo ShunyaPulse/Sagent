@@ -199,7 +199,10 @@ async function syncClientWorkspaceTool(
   if (!args || !args.path) return { success: false };
   const safePath = resolveLocalSafePath(args.path);
   if (!safePath) {
-    return { success: false, message: `Access restricted for path: ${args.path}` };
+    return {
+      success: false,
+      message: `Access restricted for path: ${args.path}`,
+    };
   }
 
   try {
@@ -216,7 +219,10 @@ async function syncClientWorkspaceTool(
 
     if (tool === "file_patcher") {
       if (!fsSync.existsSync(safePath)) {
-        return { success: false, message: `Local file not found: ${args.path}` };
+        return {
+          success: false,
+          message: `Local file not found: ${args.path}`,
+        };
       }
       const raw = await fs.readFile(safePath, "utf-8");
       const { targetContent, replacementContent, allowMultiple } = args;
@@ -228,7 +234,10 @@ async function syncClientWorkspaceTool(
         const relPath = path.relative(process.cwd(), safePath) || args.path;
         return { success: true, message: `Patched locally: ${relPath}` };
       }
-      return { success: false, message: "Target content not matched in local file" };
+      return {
+        success: false,
+        message: "Target content not matched in local file",
+      };
     }
   } catch (err: any) {
     return { success: false, message: err.message };
@@ -263,15 +272,41 @@ async function getLocalWorkspaceContext(userMessage: string): Promise<{
       if (workspaceFiles.length >= 40) break;
     }
 
+    // 1. Scan direct top-level matches
     for (const entry of entries) {
       if (entry.isFile() && !entry.name.startsWith(".env")) {
         if (userMessage.includes(entry.name)) {
           const filePath = path.join(cwd, entry.name);
           try {
             const stat = await fs.stat(filePath);
-            if (stat.size < 60000) {
+            if (stat.size < 80000) {
               const content = await fs.readFile(filePath, "utf-8");
               localFiles[entry.name] = content;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 2. Scan arbitrary relative paths in userMessage (e.g. scratch/test.txt)
+    const candidateTokens = userMessage.match(/[a-zA-Z0-9_\-\.\/\\~]+/g) || [];
+    for (const token of candidateTokens) {
+      if (token.includes("/") || token.includes("\\") || token.includes(".")) {
+        const norm = path.normalize(token).replace(/^[\\\/]+/, "");
+        const abs = path.resolve(cwd, norm);
+        if (
+          abs.startsWith(cwd) &&
+          !norm.startsWith(".env") &&
+          !norm.startsWith(".git")
+        ) {
+          try {
+            if (fsSync.existsSync(abs) && fsSync.statSync(abs).isFile()) {
+              const stat = fsSync.statSync(abs);
+              if (stat.size < 80000) {
+                const content = fsSync.readFileSync(abs, "utf-8");
+                localFiles[norm] = content;
+                localFiles[path.basename(norm)] = content;
+              }
             }
           } catch {}
         }
@@ -505,11 +540,11 @@ export async function runCli(): Promise<void> {
       ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
       : "Base 8B";
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.7 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.8 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   } else {
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.7 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.8 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   }
 

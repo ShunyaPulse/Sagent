@@ -1,6 +1,6 @@
 {
   "name": "sagentic",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Production-grade autonomous AI agent platform optimized for Google Cloud Run, Neon pgvector, and Gemini/Cloudflare",
   "main": "dist/server.js",
   "bin": {
