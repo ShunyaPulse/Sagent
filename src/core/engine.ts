@@ -236,16 +236,16 @@ export class AgentEngine {
         finalAnswerStr = finalAnswerStr.replace(/\\n/g, "\n");
       }
 
-      // Ensure clean paragraph separation after bold headers (e.g. "**Header**Body" -> "**Header**\n\nBody")
+      // Ensure clean paragraph separation after bold headers at the start of lines without breaking mid-sentence bold items
       finalAnswerStr = finalAnswerStr.replace(
-        /(\*\*[^\*]+\*\*)([A-Za-z0-9])/g,
+        /^(\*\*[^\*\n]+?\*\*)([A-Za-z0-9])/gm,
         "$1\n\n$2",
       );
 
-      // Ensure bulleted list items have clean newlines and proper spacing
+      // Ensure bulleted list items have clean newlines and proper spacing (safely ignoring bold syntax '**')
       finalAnswerStr = finalAnswerStr
-        .replace(/([^\n])\s*(\*|-)\s+/g, "$1\n$2 ")
-        .replace(/([^\n])\s*(\*|-)\s*(`)/g, "$1\n$2 $3");
+        .replace(/([^\n])\s*(?<!\*)[*-](?!\*)\s+/g, "$1\n- ")
+        .replace(/([^\n])\s*(?<!\*)[*-](?!\*)\s*(`)/g, "$1\n- $2");
 
       // Stream the answer tokens to the client
       const chunks = finalAnswerStr.match(/[\s\S]{1,16}/g) || [finalAnswerStr];

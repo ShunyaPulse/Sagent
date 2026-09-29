@@ -35,7 +35,7 @@ export const httpFetcherTool: AgentTool<typeof httpFetcherSchema> = {
         signal: controller.signal,
         headers: {
           "User-Agent":
-            "Sagent-Autonomous-Agent/1.0 (+https://github.com/ShunyaPulse/Sagent)",
+            "Sagentic-Autonomous-Agent/1.0 (+https://github.com/ShunyaPulse/Sagentic)",
           Accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
         },
       });

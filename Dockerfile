@@ -1,5 +1,5 @@
 # ==============================================================================
-# Sagent Production Multi-Stage Hardened Dockerfile (Cloud Run Ready)
+# Sagentic Production Multi-Stage Hardened Dockerfile (Cloud Run Ready)
 # Security Profile: Minimal Surface, Non-Root execution, Trivy-Hardened
 # ==============================================================================
 

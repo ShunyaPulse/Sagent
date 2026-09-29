@@ -7,7 +7,7 @@ export async function healthRoutes(fastify: FastifyInstance) {
   fastify.get("/healthz", async (_req, reply) => {
     return reply.status(200).send({
       status: "ok",
-      service: "sagent",
+      service: "sagentic",
       timestamp: new Date().toISOString(),
     });
   });
@@ -46,7 +46,7 @@ const PLAYGROUND_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sagent — Autonomous AI Agent Playground</title>
+  <title>Sagentic — Autonomous AI Agent Playground</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -58,7 +58,7 @@ const PLAYGROUND_HTML = `<!DOCTYPE html>
   <header class="border-b border-gray-800 px-6 py-3.5 flex items-center justify-between bg-[#161b22]">
     <div class="flex items-center space-x-3">
       <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center text-white font-bold text-sm shadow-md">S</div>
-      <h1 class="font-bold text-base text-gray-100 tracking-tight">Sagent Playground</h1>
+      <h1 class="font-bold text-base text-gray-100 tracking-tight">Sagentic Playground</h1>
       <span class="text-xs bg-blue-950 text-blue-400 px-2 py-0.5 rounded-full border border-blue-800 font-mono">SSE Stream</span>
     </div>
     <div class="flex items-center space-x-3 text-xs">
@@ -72,7 +72,7 @@ const PLAYGROUND_HTML = `<!DOCTYPE html>
   <!-- Main Chat Feed -->
   <main id="chatFeed" class="flex-1 overflow-y-auto p-6 space-y-4 max-w-4xl w-full mx-auto">
     <div class="bg-[#161b22] border border-gray-800 p-4 rounded-xl text-sm">
-      <p class="font-semibold text-gray-200 mb-1">👋 Welcome to Sagent Playground!</p>
+      <p class="font-semibold text-gray-200 mb-1">👋 Welcome to Sagentic Playground!</p>
       <p class="text-gray-400 mb-2">Test multi-step reasoning, SSRF-protected web scraping, vector search, and safe math evaluation.</p>
       <div class="flex flex-wrap gap-2 text-xs">
         <button onclick="sendPrompt(this.innerText)" class="bg-[#21262d] hover:bg-[#30363d] text-cyan-300 px-2.5 py-1.5 rounded-lg border border-gray-700 transition">What is (450 * 1.18) - 50?</button>
@@ -88,7 +88,7 @@ const PLAYGROUND_HTML = `<!DOCTYPE html>
       <input 
         id="promptInput" 
         type="text" 
-        placeholder="Ask Sagent to reason, execute tools, scrape web, or calculate..." 
+        placeholder="Ask Sagentic to reason, execute tools, scrape web, or calculate..." 
         autocomplete="off"
         class="flex-1 bg-[#0d1117] border border-gray-700 focus:border-blue-500 rounded-xl px-4 py-3 text-sm text-gray-100 outline-none transition"
       />

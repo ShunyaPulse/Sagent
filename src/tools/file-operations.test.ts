@@ -34,7 +34,7 @@ test("resolveSafePath: blocks protected sensitive files (.env, .git)", () => {
 
 test("fileWriterTool & fileReaderTool: creates, reads, and cleans up workspace file", async () => {
   const testFile = "scratch/test-file-ops/hello.txt";
-  const testContent = "Hello from Sagent File Writer!\nLine 2 content.";
+  const testContent = "Hello from Sagentic File Writer!\nLine 2 content.";
 
   // 1. Write File
   const writeRes = await fileWriterTool.execute(

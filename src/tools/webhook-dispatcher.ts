@@ -52,10 +52,10 @@ export const webhookDispatcherTool: AgentTool<typeof webhookSchema> = {
         signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
-          "User-Agent": "Sagent-Webhook-Dispatcher/1.0",
-          "X-Sagent-Event": event,
-          "X-Sagent-Timestamp": timestamp,
-          "X-Sagent-Signature": signature,
+          "User-Agent": "Sagentic-Webhook-Dispatcher/1.0",
+          "X-Sagentic-Event": event,
+          "X-Sagentic-Timestamp": timestamp,
+          "X-Sagentic-Signature": signature,
         },
         body: bodyString,
       });

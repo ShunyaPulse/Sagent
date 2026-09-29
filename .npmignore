@@ -1,0 +1,20 @@
+# Secrets & credentials (NEVER package)
+.env
+.env.*
+*.env
+*.pem
+*.key
+
+# Development & tests
+src/
+scripts/
+scratch/
+tests/
+*.test.ts
+*.test.js
+tsconfig.json
+.github/
+.agents/
+.gitleaks.toml
+.semgrepignore
+promptfooconfig.yaml

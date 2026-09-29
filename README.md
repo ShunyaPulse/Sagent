@@ -1,3 +1,3 @@
-# Sagent
+# Sagentic
 
-Sagent Workspace & Project Repository
+Autonomous AI Agent Platform & CLI Tool.

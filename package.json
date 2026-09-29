@@ -1,12 +1,19 @@
 {
-  "name": "sagent",
+  "name": "sagentic",
   "version": "1.0.0",
   "description": "Production-grade autonomous AI agent platform optimized for Google Cloud Run, Neon pgvector, and Gemini/Cloudflare",
   "main": "dist/server.js",
+  "bin": {
+    "sagentic": "bin/sagentic.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "chat": "tsx scripts/chat.ts",
+    "chat": "tsx src/cli.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:migrate": "tsx src/db/migrate.ts",

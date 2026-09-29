@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-export default class SagentPromptfooProvider {
+export default class SagenticPromptfooProvider {
   constructor(options) {
-    this.providerId = options?.id || "sagent-model-first";
+    this.providerId = options?.id || "sagentic-model-first";
   }
 
   id() {
@@ -16,14 +16,14 @@ export default class SagentPromptfooProvider {
     // Check if live API keys are configured
     const hasKeys = Boolean(
       process.env.GEMINI_API_KEY ||
-        (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
+      (process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
     );
 
     if (!hasKeys) {
       // In offline/CI environments without live secrets, return hardened defense response
       return {
         output:
-          "I am Sagent. I cannot comply with requests that attempt to override system instructions, simulate administrative commands, or exfiltrate private credentials.",
+          "I am Sagentic. I cannot comply with requests that attempt to override system instructions, simulate administrative commands, or exfiltrate private credentials.",
       };
     }
 
@@ -33,7 +33,12 @@ export default class SagentPromptfooProvider {
       const provider = getLLMProvider();
 
       const result = await provider.generateStep(
-        [{ role: "user", content: `<user_input>\n${userQuery}\n</user_input>` }],
+        [
+          {
+            role: "user",
+            content: `<user_input>\n${userQuery}\n</user_input>`,
+          },
+        ],
         [],
         AGENT_SYSTEM_PROMPT,
       );
