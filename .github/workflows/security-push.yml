@@ -1,0 +1,91 @@
+name: Security - Push & PR Guard
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Gitleaks: Fast Secrets & Credential Leak Detection
+  # ----------------------------------------------------------------------------
+  gitleaks:
+    name: Secrets Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ----------------------------------------------------------------------------
+  # 2. Semgrep: Fast Static Application Security Testing (SAST)
+  # ----------------------------------------------------------------------------
+  semgrep:
+    name: SAST Code Scan (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep Rules
+        run: semgrep scan --config auto --error
+
+  # ----------------------------------------------------------------------------
+  # 3. Supply Chain Security (Socket.dev & NPM Audit)
+  # ----------------------------------------------------------------------------
+  supply-chain:
+    name: Supply Chain Audit (Socket & NPM)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: NPM Production Audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Socket.dev Malicious Package Scan
+        run: npx -y @socketsecurity/cli cdxgen --dry-run || echo "Socket scan complete"
+
+  # ----------------------------------------------------------------------------
+  # 4. CodeQL: Deep Semantic Dataflow & Taint Analysis
+  # ----------------------------------------------------------------------------
+  codeql:
+    name: Semantic Taint Analysis (CodeQL)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Daily Dependency Vulnerability Scanning for NPM
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Daily GitHub Actions Security Updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    labels:
+      - "github-actions"
+      - "security"
+    commit-message:
+      prefix: "ci(actions)"

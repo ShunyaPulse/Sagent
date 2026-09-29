@@ -67,10 +67,12 @@ export class AgentEngine {
       );
 
       // Reconstruct chronological message history from past turns
-      const messages: Message[] = [...historyRows.rows].reverse().map((row) => ({
-        role: row.role,
-        content: row.content,
-      }));
+      const messages: Message[] = [...historyRows.rows]
+        .reverse()
+        .map((row) => ({
+          role: row.role,
+          content: row.content,
+        }));
 
       // Append current user message with injection defense delimiters
       const formattedInput = formatUserMessageWithDelimiters(userMessage);

@@ -1,0 +1,19 @@
+# ==============================================================================
+# Gitleaks Configuration for Sagent
+# Scans git commits, branches, and PRs for leaked API keys and secrets
+# ==============================================================================
+
+title = "Sagent Gitleaks Security Profile"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore build artifacts, dependencies, and test mocks"
+paths = [
+  '''^\.env\.example$''',
+  '''^dist/''',
+  '''^node_modules/''',
+  '''package-lock\.json''',
+  '''\.test\.ts$'''
+]
