@@ -94,14 +94,18 @@ Commands: /clear (reset session), /debug (toggle debug), /help, exit
 
       if (lower === "/clear" || lower === "/reset") {
         sessionId = `cli_${Date.now()}`;
-        console.log(`\x1b[32m🧹 Session reset! New session: ${sessionId}\x1b[0m`);
+        console.log(
+          `\x1b[32m🧹 Session reset! New session: ${sessionId}\x1b[0m`,
+        );
         ask();
         return;
       }
 
       if (lower === "/debug") {
         debugMode = !debugMode;
-        console.log(`\x1b[33m🔧 Debug mode is now ${debugMode ? "ENABLED" : "DISABLED"}\x1b[0m`);
+        console.log(
+          `\x1b[33m🔧 Debug mode is now ${debugMode ? "ENABLED" : "DISABLED"}\x1b[0m`,
+        );
         ask();
         return;
       }

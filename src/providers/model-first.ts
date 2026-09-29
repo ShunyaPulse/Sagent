@@ -101,7 +101,10 @@ export class ModelFirstProvider implements LLMProvider {
     systemInstruction: string,
     onToken: (token: string) => void,
   ): Promise<{ fullText: string; tokensUsed: number }> {
-    if (this.cloudflareProvider && env.LLM_PROVIDER === "cloudflare") {
+    if (
+      this.cloudflareProvider &&
+      (env.LLM_PROVIDER === "cloudflare" || env.CLOUDFLARE_LORA_NAME)
+    ) {
       try {
         return await this.cloudflareProvider.streamFinalAnswer(
           messages,
@@ -109,9 +112,11 @@ export class ModelFirstProvider implements LLMProvider {
           onToken,
         );
       } catch (cfErr: any) {
-        console.warn(
-          `⚠️ Cloudflare stream failed: ${cfErr.message}. Escalating to Gemini Model-First...`,
-        );
+        if (process.env.DEBUG_PROVIDERS === "true") {
+          console.warn(
+            `⚠️ Cloudflare stream failed: ${cfErr.message}. Escalating to Gemini Model-First...`,
+          );
+        }
       }
     }
 

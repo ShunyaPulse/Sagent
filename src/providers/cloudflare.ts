@@ -72,13 +72,24 @@ You must respond in strict JSON format matching ONE of these two schemas:
     const promptMessages = [
       { role: "system", content: enrichedSystemPrompt },
       ...messages.map((m) => {
-        let text = m.content;
+        let text = m.content || "";
+        if (
+          m.toolCalls &&
+          m.toolCalls.length > 0 &&
+          !text.includes(m.toolCalls[0].name)
+        ) {
+          text = JSON.stringify({
+            thought: m.content || undefined,
+            tool: m.toolCalls[0].name,
+            arguments: m.toolCalls[0].arguments,
+          });
+        }
         if (m.toolResults && m.toolResults.length > 0) {
           text += `\nTool Observations:\n${JSON.stringify(m.toolResults)}`;
         }
         return {
           role: m.role === "model" ? "assistant" : "user",
-          content: text,
+          content: text || " ",
         };
       }),
     ];

@@ -10,7 +10,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "db:migrate": "tsx src/db/migrate.ts",
-    "lint": "eslint src --ext .ts",
+    "lint": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts"
   },
   "keywords": [

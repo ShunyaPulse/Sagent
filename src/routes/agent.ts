@@ -106,6 +106,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
 
       try {
         if (stream) {
+          reply.hijack();
           reply.raw.setHeader(
             "Content-Type",
             "text/event-stream; charset=utf-8",
@@ -128,7 +129,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
           });
 
           reply.raw.end();
-          return reply;
+          return;
         } else {
           const eventsRecorded: AgentStreamEvent[] = [];
           const result = await engine.run({

@@ -12,19 +12,15 @@
 import { env } from "../config/env.js";
 
 export const SARALGATI_CANDIDATE_MODELS = [
-  "gemini-3.8-flash", // Latest stable, highest quality  (5 RPM / 20 RPD)
-  "gemini-3.7-flash", // Previous gen, highly capable    (5 RPM / 20 RPD)
-  "gemini-3.6-flash", // Solid fast fallback             (5 RPM / 20 RPD)
-  "gemini-3.5-flash", // Widely available               (5 RPM / 20 RPD)
-  "gemini-3-flash-preview", // Gemini 3 Flash Preview          (5 RPM / 20 RPD)
-  "gemini-2.5-flash", // Stable Gemini 2.5 Flash         (5 RPM / 20 RPD)
-  "gemini-3.5-flash-lite", // High-throughput lite            (15 RPM / 500 RPD)
-  "gemini-3.1-flash-lite", // High-throughput lite            (15 RPM / 500 RPD)
-  "gemini-2.5-flash-lite", // Ultra-fast 2.5 lite             (10 RPM / 20 RPD)
-  "gemma-4-26b-a4b-it", // Gemma 4 26B instruction-tuned   (30 RPM / 14,400 RPD)
-  "gemma-4-31b-it", // Gemma 4 31B instruction-tuned   (30 RPM / 14,400 RPD)
-  "gemini-flash-lite-latest", // High-throughput lite fallback
-  "gemini-flash-latest", // Dynamic alias fallback
+  "gemini-2.5-flash", // Production default, stable tool calling (5 RPM / 20 RPD)
+  "gemini-2.5-flash-lite", // Ultra-fast 2.5 lite (10 RPM / 20 RPD)
+  "gemini-3.8-flash", // Latest stable, highest quality (5 RPM / 20 RPD)
+  "gemini-3.7-flash", // Previous gen, highly capable (5 RPM / 20 RPD)
+  "gemini-3.6-flash", // Solid fast fallback (5 RPM / 20 RPD)
+  "gemini-3.5-flash", // Widely available (10 RPM / 20 RPD)
+  "gemini-3-flash-preview", // Gemini 3 Flash Preview (5 RPM / 20 RPD)
+  "gemini-3.5-flash-lite", // High-throughput lite (30 RPM / 1500 RPD)
+  "gemini-3.1-flash-lite", // Ultra-lite fallback (30 RPM / 1500 RPD)
 ];
 
 export class GeminiKeyRotator {
@@ -144,9 +140,11 @@ export class GeminiKeyRotator {
             msg.includes("high demand") ||
             msg.includes("overloaded")
           ) {
-            console.log(
-              `  ⚡ ${modelName} is experiencing temporary high demand (503). Fast-switching to next candidate model...`,
-            );
+            if (process.env.DEBUG_ROTATOR === "true") {
+              console.log(
+                `  ⚡ ${modelName} is experiencing temporary high demand (503). Fast-switching to next candidate model...`,
+              );
+            }
             modelExhausted = false;
             break;
           }
@@ -169,9 +167,11 @@ export class GeminiKeyRotator {
             msg.includes("resource_exhausted") ||
             msg.includes("quota")
           ) {
-            console.log(
-              `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] project quota reached on ${modelName}, rotating to next project key...`,
-            );
+            if (process.env.DEBUG_ROTATOR === "true") {
+              console.log(
+                `  ⏭ Key [${keyIdx + 1}/${this.keys.length}] project quota reached on ${modelName}, rotating to next project key...`,
+              );
+            }
             continue;
           }
 
@@ -181,9 +181,11 @@ export class GeminiKeyRotator {
       }
 
       if (modelExhausted) {
-        console.warn(
-          `  ❌ All ${this.keys.length} keys exhausted on ${modelName}. Falling to next model...`,
-        );
+        if (process.env.DEBUG_ROTATOR === "true") {
+          console.warn(
+            `  ❌ All ${this.keys.length} keys exhausted on ${modelName}. Falling to next model...`,
+          );
+        }
       }
     }
 

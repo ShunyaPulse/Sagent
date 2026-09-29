@@ -69,6 +69,10 @@ export class GeminiProvider implements LLMProvider {
         }
       }
 
+      if (parts.length === 0) {
+        parts.push({ text: " " });
+      }
+
       return {
         role: m.role === "model" ? "model" : "user",
         parts,
@@ -105,8 +109,17 @@ export class GeminiProvider implements LLMProvider {
           }
         }
 
-        if (response.text) {
-          thoughtText = response.text;
+        try {
+          const textPart = response.candidates?.[0]?.content?.parts?.find(
+            (p: any) => typeof p.text === "string",
+          );
+          if (textPart && textPart.text) {
+            thoughtText = textPart.text;
+          } else if (response.text) {
+            thoughtText = response.text;
+          }
+        } catch {
+          thoughtText = undefined;
         }
 
         return {
