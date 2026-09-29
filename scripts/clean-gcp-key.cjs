@@ -1,34 +1,37 @@
 const fs = require('fs');
 const crypto = require('crypto');
 
-function cleanKey(raw) {
-  if (!raw || typeof raw !== 'string') {
+function universalKeyExtract(str) {
+  if (!str || typeof str !== 'string') {
     throw new Error('Key must be a non-empty string');
   }
 
-  // Ensure boundary markers are separated from surrounding content
-  let str = raw
-    .replace(/(-{5}BEGIN [A-Z0-9 ]+-{5})/g, '\n$1\n')
-    .replace(/(-{5}END [A-Z0-9 ]+-{5})/g, '\n$1\n');
+  const isPkcs1 = /RSA PRIVATE KEY/i.test(str);
 
-  // Split on all forms of line breaks: literal \r\n, \n, \\n, or actual linefeeds
-  const lines = str.split(/(?:\\+[rn]|\r?\n)+/).map((l) => l.trim()).filter(Boolean);
-  const headerIdx = lines.findIndex((l) => l.startsWith('-----BEGIN'));
-  const footerIdx = lines.findIndex((l) => l.startsWith('-----END'));
+  // 1. Remove all newline representations (both escaped and literal)
+  const strippedBreaks = str.replace(/(?:\\+[rn]|\r?\n)+/g, '');
 
-  if (headerIdx === -1 || footerIdx === -1) {
-    throw new Error('Missing PEM header (-----BEGIN) or footer (-----END)');
+  // 2. Find the ASN.1 DER Base64 payload (starts with MII, min length 100)
+  const miiMatch = strippedBreaks.match(/MII[A-Za-z0-9+/=]{100,}/);
+  if (!miiMatch) {
+    throw new Error('Could not find ASN.1 Base64 key payload (starting with MII)');
+  }
+  const base64Body = miiMatch[0].replace(/[^A-Za-z0-9+/=]/g, '');
+  const wrapped = (base64Body.match(/.{1,64}/g) || []).join('\n');
+
+  const candidates = isPkcs1
+    ? ['RSA PRIVATE KEY', 'PRIVATE KEY']
+    : ['PRIVATE KEY', 'RSA PRIVATE KEY'];
+
+  for (const type of candidates) {
+    const pem = `-----BEGIN ${type}-----\n${wrapped}\n-----END ${type}-----\n`;
+    try {
+      crypto.createPrivateKey(pem);
+      return pem;
+    } catch {}
   }
 
-  const header = lines[headerIdx];
-  const footer = lines[footerIdx];
-  const base64Lines = lines.slice(headerIdx + 1, footerIdx);
-
-  // Keep only valid Base64 characters in the body
-  const fullBase64 = base64Lines.join('').replace(/[^A-Za-z0-9+/=]/g, '');
-  const wrapped = (fullBase64.match(/.{1,64}/g) || []).join('\n');
-
-  return `${header}\n${wrapped}\n${footer}\n`;
+  throw new Error('Failed to validate key with either PKCS#8 or PKCS#1 framing');
 }
 
 function main() {
@@ -57,10 +60,8 @@ function main() {
 
   if (obj.private_key && typeof obj.private_key === 'string') {
     try {
-      obj.private_key = cleanKey(obj.private_key);
-      // Validate key with Node.js crypto module to ensure OpenSSL compatibility
-      crypto.createPrivateKey(obj.private_key);
-      console.log('Successfully validated Service Account private key with OpenSSL crypto engine.');
+      obj.private_key = universalKeyExtract(obj.private_key);
+      console.log('Successfully extracted and validated Service Account private key with OpenSSL crypto engine.');
     } catch (err) {
       console.error('ERROR: Failed to validate reconstructed private key:', err.message);
       process.exit(1);
