@@ -18,7 +18,9 @@ async function runMigrations() {
   }
 
   if (!pool) {
-    console.error("❌ DATABASE_URL must be defined to run database migrations.");
+    console.error(
+      "❌ DATABASE_URL must be defined to run database migrations.",
+    );
     process.exit(1);
   }
 

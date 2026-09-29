@@ -70,12 +70,10 @@ export class AgentEngine {
            LIMIT 10`,
           [context.sessionId],
         );
-        messages = [...historyRows.rows]
-          .reverse()
-          .map((row) => ({
-            role: row.role,
-            content: row.content,
-          }));
+        messages = [...historyRows.rows].reverse().map((row) => ({
+          role: row.role,
+          content: row.content,
+        }));
       } else {
         const mem = AgentEngine.inMemorySessions.get(context.sessionId) || [];
         messages = [...mem.slice(-10)];
