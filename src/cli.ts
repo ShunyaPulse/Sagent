@@ -28,6 +28,9 @@ function formatToolCallInfo(tool: string, args: Record<string, any>): string {
         : 0;
     return `"${args.path || ""}", ${bytes} B`;
   }
+  if (tool === "file_patcher") {
+    return `"${args.path || ""}"`;
+  }
   if (tool === "file_reader") {
     return `"${args.path || ""}"`;
   }
@@ -372,11 +375,11 @@ export async function runCli(): Promise<void> {
       ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
       : "Base 8B";
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.4 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.5 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   } else {
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.4 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.5 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   }
 

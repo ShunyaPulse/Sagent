@@ -212,3 +212,95 @@ export const directoryListerTool: AgentTool<typeof directoryListerSchema> = {
     }
   },
 };
+
+// -----------------------------------------------------------------------------
+// 4. File Patcher Tool (Surgical Search & Replace)
+// -----------------------------------------------------------------------------
+const filePatcherSchema = z.object({
+  path: z
+    .string()
+    .describe("Relative path of the file to modify within the workspace"),
+  targetContent: z
+    .string()
+    .describe(
+      "The exact contiguous block of code/text to find and replace. Must match existing text in the file.",
+    ),
+  replacementContent: z
+    .string()
+    .describe("The new code/text to replace the targetContent with."),
+  allowMultiple: z
+    .boolean()
+    .default(false)
+    .describe(
+      "If true, all occurrences of targetContent will be replaced. If false (default), targetContent must match exactly once.",
+    ),
+});
+
+export const filePatcherTool: AgentTool<typeof filePatcherSchema> = {
+  name: "file_patcher",
+  description:
+    "Surgically replaces a specific block of text/code in an existing file without rewriting the entire file. Prevents accidental truncation.",
+  parameters: filePatcherSchema,
+  execute: async ({
+    path: targetPath,
+    targetContent,
+    replacementContent,
+    allowMultiple,
+  }) => {
+    try {
+      const safePath = resolveSafePath(targetPath);
+      let raw: string;
+      try {
+        raw = await fs.readFile(safePath, "utf-8");
+      } catch {
+        return {
+          error: `File not found at "${targetPath}". Use file_writer if you want to create a new file.`,
+          success: false,
+        };
+      }
+
+      if (!targetContent) {
+        return {
+          error: "targetContent cannot be empty.",
+          success: false,
+        };
+      }
+
+      const occurrences = raw.split(targetContent).length - 1;
+
+      if (occurrences === 0) {
+        return {
+          error: `targetContent not found in "${targetPath}". Ensure exact whitespace, indentation, and casing match the target file.`,
+          success: false,
+        };
+      }
+
+      if (occurrences > 1 && !allowMultiple) {
+        return {
+          error: `targetContent matched ${occurrences} times in "${targetPath}". Provide more surrounding context to match a unique block, or set allowMultiple: true.`,
+          success: false,
+        };
+      }
+
+      const updated = allowMultiple
+        ? raw.replaceAll(targetContent, replacementContent)
+        : raw.replace(targetContent, replacementContent);
+
+      await fs.writeFile(safePath, updated, "utf-8");
+
+      return {
+        path: path.relative(ROOT_WORKSPACE, safePath),
+        success: true,
+        replacementsMade: allowMultiple ? occurrences : 1,
+        bytesBefore: Buffer.byteLength(raw, "utf-8"),
+        bytesAfter: Buffer.byteLength(updated, "utf-8"),
+      };
+    } catch (err: any) {
+      return {
+        error: err.message,
+        path: targetPath,
+        success: false,
+      };
+    }
+  },
+};

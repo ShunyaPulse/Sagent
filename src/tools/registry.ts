@@ -7,6 +7,7 @@ import {
   fileWriterTool,
   fileReaderTool,
   directoryListerTool,
+  filePatcherTool,
 } from "./file-operations.js";
 import { query } from "../db/postgres.js";
 
@@ -21,6 +22,7 @@ export class ToolRegistry {
     this.register(fileWriterTool);
     this.register(fileReaderTool);
     this.register(directoryListerTool);
+    this.register(filePatcherTool);
   }
 
   register(tool: AgentTool<any>) {
