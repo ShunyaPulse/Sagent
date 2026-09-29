@@ -59,30 +59,54 @@ jobs:
 
       - name: Authenticate to Google Cloud
         env:
-          GCP_SA_KEY: ${{ secrets.GCP_CREDENTIALS || secrets.GCP_SA_KEY }}
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           trap 'rm -f /tmp/gcp-sa-key.json' EXIT
           node -e '
             const fs = require("fs");
-            let raw = process.env.GCP_SA_KEY || "";
-            let obj;
-            try {
-              obj = JSON.parse(raw);
-            } catch (e) {
+            const crypto = require("crypto");
+
+            function reconstructKey(str) {
+              let cleaned = str.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\r\n/g, "\n");
+              const headerMatch = cleaned.match(/-----BEGIN [A-Z0-9 ]+-----/);
+              const footerMatch = cleaned.match(/-----END [A-Z0-9 ]+-----/);
+              if (!headerMatch || !footerMatch) return cleaned;
+              const header = headerMatch[0];
+              const footer = footerMatch[0];
+              const startIdx = cleaned.indexOf(header) + header.length;
+              const endIdx = cleaned.indexOf(footer);
+              const body = cleaned.substring(startIdx, endIdx).replace(/[^A-Za-z0-9+/=]/g, "");
+              const wrapped = (body.match(/.{1,64}/g) || []).join("\n");
+              return `${header}\n${wrapped}\n${footer}\n`;
+            }
+
+            const candidates = [process.env.GCP_CREDENTIALS, process.env.GCP_SA_KEY].filter(Boolean);
+            let obj = null;
+            for (const cand of candidates) {
               try {
-                obj = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-              } catch (e2) {
-                throw new Error("Failed to parse GCP_SA_KEY: " + e2.message);
-              }
+                let parsed;
+                try {
+                  parsed = JSON.parse(cand);
+                } catch {
+                  parsed = JSON.parse(Buffer.from(cand, "base64").toString("utf8"));
+                }
+                if (parsed && (parsed.private_key || parsed.client_email)) {
+                  obj = parsed;
+                  break;
+                }
+              } catch {}
             }
+
+            if (!obj) {
+              throw new Error("Could not find valid GCP credentials JSON in GCP_CREDENTIALS or GCP_SA_KEY secrets");
+            }
+
             if (obj.private_key && typeof obj.private_key === "string") {
-              obj.private_key = obj.private_key
-                .replace(/\\\\r\\\\n/g, "\n")
-                .replace(/\\\\n/g, "\n")
-                .replace(/\\r\\n/g, "\n")
-                .replace(/\\n/g, "\n")
-                .replace(/\r\n/g, "\n");
+              obj.private_key = reconstructKey(obj.private_key);
+              crypto.createPrivateKey(obj.private_key);
             }
+
             fs.writeFileSync("/tmp/gcp-sa-key.json", JSON.stringify(obj, null, 2), { mode: 0o600 });
           '
           gcloud auth activate-service-account --key-file=/tmp/gcp-sa-key.json
@@ -121,3 +145,6 @@ jobs:
             --cpu-throttling \
             --port=8080 \
             --set-env-vars="NODE_ENV=production,DATABASE_URL=${DATABASE_URL},AUTH_SECRET=${AUTH_SECRET},ORIGIN_SECRET=${ORIGIN_SECRET},GEMINI_API_KEY=${GEMINI_API_KEY},CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID},CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN},CLOUDFLARE_LORA_NAME=${CLOUDFLARE_LORA_NAME},REDIS_URL=${REDIS_URL}"
+
+          echo "Deployment complete! Live Cloud Run URL:"
+          gcloud run services describe "$SERVICE_NAME" --region="$REGION" --project="$GCP_PROJECT" --format='value(status.url)'
