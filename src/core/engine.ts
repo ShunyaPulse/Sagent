@@ -153,7 +153,11 @@ export class AgentEngine {
             if (tc.name === "file_writer") {
               const targetPath = tc.arguments?.path;
               const isAppend = Boolean(tc.arguments?.append);
-              if (targetPath && writtenPathsInRun.has(targetPath) && !isAppend) {
+              if (
+                targetPath &&
+                writtenPathsInRun.has(targetPath) &&
+                !isAppend
+              ) {
                 finalAnswer = `I have successfully created and saved "${targetPath}".`;
                 break;
               }

@@ -284,12 +284,7 @@ export const filePatcherTool: AgentTool<typeof filePatcherSchema> = {
     "Surgically replaces a specific block of text/code in an existing file without rewriting the entire file. Prevents accidental truncation.",
   parameters: filePatcherSchema,
   execute: async (
-    {
-      path: targetPath,
-      targetContent,
-      replacementContent,
-      allowMultiple,
-    },
+    { path: targetPath, targetContent, replacementContent, allowMultiple },
     context,
   ) => {
     try {
