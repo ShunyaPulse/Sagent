@@ -218,20 +218,58 @@ async function syncClientWorkspaceTool(
     }
 
     if (tool === "file_patcher") {
-      if (!fsSync.existsSync(safePath)) {
+      let targetFile = safePath;
+      if (!fsSync.existsSync(targetFile)) {
+        // Fallback: search directory for case-insensitive or extension match
+        const dir = path.dirname(safePath);
+        const baseName = path.basename(safePath).toLowerCase();
+        try {
+          const files = fsSync.readdirSync(dir);
+          const found = files.find(
+            (f) =>
+              f.toLowerCase() === baseName ||
+              path.parse(f).name.toLowerCase() === baseName,
+          );
+          if (found) {
+            targetFile = path.join(dir, found);
+          }
+        } catch {}
+      }
+
+      if (!fsSync.existsSync(targetFile)) {
         return {
           success: false,
           message: `Local file not found: ${args.path}`,
         };
       }
-      const raw = await fs.readFile(safePath, "utf-8");
-      const { targetContent, replacementContent, allowMultiple } = args;
-      if (targetContent && raw.includes(targetContent)) {
+      const raw = await fs.readFile(targetFile, "utf-8");
+      const { targetContent, replacementContent = "", allowMultiple } = args;
+
+      // Match with quotes or CRLF normalization
+      let searchTarget = targetContent;
+      let matches = raw.includes(searchTarget);
+      if (!matches && /^['"`].*['"`]$/.test(searchTarget)) {
+        const unquoted = searchTarget.slice(1, -1);
+        if (raw.includes(unquoted)) {
+          searchTarget = unquoted;
+          matches = true;
+        }
+      }
+      if (!matches) {
+        const rawLF = raw.replace(/\r\n/g, "\n");
+        const targetLF = searchTarget.replace(/\r\n/g, "\n");
+        if (rawLF.includes(targetLF)) {
+          searchTarget = targetLF;
+          matches = true;
+        }
+      }
+
+      if (matches) {
         const updated = allowMultiple
-          ? raw.replaceAll(targetContent, replacementContent || "")
-          : raw.replace(targetContent, replacementContent || "");
-        await fs.writeFile(safePath, updated, "utf-8");
-        const relPath = path.relative(process.cwd(), safePath) || args.path;
+          ? raw.replaceAll(searchTarget, replacementContent || "")
+          : raw.replace(searchTarget, replacementContent || "");
+        await fs.writeFile(targetFile, updated, "utf-8");
+        const relPath = path.relative(process.cwd(), targetFile) || args.path;
         return { success: true, message: `Patched locally: ${relPath}` };
       }
       return {
@@ -272,16 +310,23 @@ async function getLocalWorkspaceContext(userMessage: string): Promise<{
       if (workspaceFiles.length >= 40) break;
     }
 
-    // 1. Scan direct top-level matches
+    // 1. Scan direct top-level matches (supporting case-insensitive & extension-agnostic match)
+    const userMsgLower = userMessage.toLowerCase();
     for (const entry of entries) {
       if (entry.isFile() && !entry.name.startsWith(".env")) {
-        if (userMessage.includes(entry.name)) {
+        const nameLower = entry.name.toLowerCase();
+        const baseNameLower = path.parse(entry.name).name.toLowerCase();
+        if (
+          userMsgLower.includes(nameLower) ||
+          userMsgLower.includes(baseNameLower)
+        ) {
           const filePath = path.join(cwd, entry.name);
           try {
             const stat = await fs.stat(filePath);
             if (stat.size < 80000) {
               const content = await fs.readFile(filePath, "utf-8");
               localFiles[entry.name] = content;
+              localFiles[path.parse(entry.name).name] = content;
             }
           } catch {}
         }
@@ -355,8 +400,12 @@ function handleStreamEvent(event: any, state: StreamState) {
       last.isError = event.isError;
     }
     if (event.isError) {
+      const errDetail =
+        event.result?.error ||
+        (typeof event.result === "string" ? event.result : "");
+      const errSnippet = errDetail ? `: ${errDetail.slice(0, 80)}` : "";
       console.log(
-        `  \x1b[90m└─\x1b[0m \x1b[31m✖ Error\x1b[0m \x1b[90m(${event.durationMs}ms)\x1b[0m`,
+        `  \x1b[90m└─\x1b[0m \x1b[31m✖ Error\x1b[0m \x1b[90m(${event.durationMs}ms${errSnippet})\x1b[0m`,
       );
     } else {
       console.log(

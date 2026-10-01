@@ -45,6 +45,64 @@ export function resolveSafePath(targetPath: string): string {
   return absolutePath;
 }
 
+/**
+ * Finds a matching file in client workspace snapshot (supports exact, case-insensitive, and extension-agnostic match).
+ */
+export function findInLocalFiles(
+  localFiles: Record<string, string> | undefined,
+  targetPath: string,
+): { matchedPath: string; content: string } | null {
+  if (!localFiles) return null;
+  // 1. Direct exact key match
+  if (localFiles[targetPath]) {
+    return { matchedPath: targetPath, content: localFiles[targetPath] };
+  }
+  const base = path.basename(targetPath);
+  if (localFiles[base]) {
+    return { matchedPath: base, content: localFiles[base] };
+  }
+
+  // 2. Case-insensitive exact match
+  const lowerTarget = targetPath.toLowerCase();
+  const lowerBase = base.toLowerCase();
+  for (const [k, v] of Object.entries(localFiles)) {
+    if (k.toLowerCase() === lowerTarget || k.toLowerCase() === lowerBase) {
+      return { matchedPath: k, content: v };
+    }
+  }
+
+  // 3. Extension-agnostic match (e.g. "Muskan" matches "Muskan.txt", "Muskan.md")
+  for (const [k, v] of Object.entries(localFiles)) {
+    const kBase = path.parse(k).name.toLowerCase();
+    if (kBase === lowerBase || kBase === lowerTarget) {
+      return { matchedPath: k, content: v };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Searches disk for the file, falling back to common text extensions if extension was omitted.
+ */
+export async function findOnDiskWithExtensions(
+  safePath: string,
+): Promise<string | null> {
+  try {
+    await fs.access(safePath);
+    return safePath;
+  } catch {}
+  const exts = [".txt", ".md", ".json", ".ts", ".js", ".html", ".css", ".py"];
+  for (const ext of exts) {
+    try {
+      const candidate = safePath + ext;
+      await fs.access(candidate);
+      return candidate;
+    } catch {}
+  }
+  return null;
+}
+
 // -----------------------------------------------------------------------------
 // 1. File Writer Tool
 // -----------------------------------------------------------------------------
@@ -132,14 +190,15 @@ export const fileReaderTool: AgentTool<typeof fileReaderSchema> = {
   parameters: fileReaderSchema,
   execute: async ({ path: targetPath, maxLines }, context) => {
     try {
-      // Check if file was provided from client workspace snapshot
-      if (context?.localFiles && context.localFiles[targetPath]) {
-        const raw = context.localFiles[targetPath];
+      // 1. Check client workspace snapshot first (exact, case-insensitive, or extension-agnostic)
+      const localMatch = findInLocalFiles(context?.localFiles, targetPath);
+      if (localMatch) {
+        const raw = localMatch.content;
         const lines = raw.split("\n");
         const truncated = lines.length > maxLines;
         const content = truncated ? lines.slice(0, maxLines).join("\n") : raw;
         return {
-          path: targetPath,
+          path: localMatch.matchedPath,
           content,
           totalLines: lines.length,
           truncated,
@@ -147,14 +206,16 @@ export const fileReaderTool: AgentTool<typeof fileReaderSchema> = {
         };
       }
 
+      // 2. Resolve disk path with extension fallback
       const safePath = resolveSafePath(targetPath);
-      const raw = await fs.readFile(safePath, "utf-8");
+      const diskPath = (await findOnDiskWithExtensions(safePath)) || safePath;
+      const raw = await fs.readFile(diskPath, "utf-8");
       const lines = raw.split("\n");
       const truncated = lines.length > maxLines;
       const content = truncated ? lines.slice(0, maxLines).join("\n") : raw;
 
       return {
-        path: path.relative(ROOT_WORKSPACE, safePath),
+        path: path.relative(ROOT_WORKSPACE, diskPath),
         content,
         totalLines: lines.length,
         truncated,
@@ -269,7 +330,10 @@ const filePatcherSchema = z.object({
     ),
   replacementContent: z
     .string()
-    .describe("The new code/text to replace the targetContent with."),
+    .default("")
+    .describe(
+      "The new code/text to replace the targetContent with. Defaults to empty string '' (which surgically removes targetContent).",
+    ),
   allowMultiple: z
     .boolean()
     .default(false)
@@ -281,32 +345,39 @@ const filePatcherSchema = z.object({
 export const filePatcherTool: AgentTool<typeof filePatcherSchema> = {
   name: "file_patcher",
   description:
-    "Surgically replaces a specific block of text/code in an existing file without rewriting the entire file. Prevents accidental truncation.",
+    "Surgically replaces a specific block of text/code in an existing file without rewriting the entire file. Set replacementContent to '' (default) to remove text.",
   parameters: filePatcherSchema,
   execute: async (
-    { path: targetPath, targetContent, replacementContent, allowMultiple },
+    {
+      path: targetPath,
+      targetContent,
+      replacementContent = "",
+      allowMultiple = false,
+    },
     context,
   ) => {
     try {
-      const safePath = resolveSafePath(targetPath);
+      // 1. Check client workspace snapshot first (exact, case-insensitive, or extension-agnostic)
+      const localMatch = findInLocalFiles(context?.localFiles, targetPath);
       let raw: string = "";
-      if (
-        context?.localFiles &&
-        (context.localFiles[targetPath] ||
-          context.localFiles[path.basename(targetPath)])
-      ) {
-        raw =
-          context.localFiles[targetPath] ||
-          context.localFiles[path.basename(targetPath)];
+      let resolvedFilePath = targetPath;
+      let safePath: string | null = null;
+
+      if (localMatch) {
+        raw = localMatch.content;
+        resolvedFilePath = localMatch.matchedPath;
       } else {
-        try {
-          raw = await fs.readFile(safePath, "utf-8");
-        } catch {
+        safePath = resolveSafePath(targetPath);
+        const diskPath = await findOnDiskWithExtensions(safePath);
+        if (!diskPath) {
           return {
-            error: `File not found at "${targetPath}". Use file_writer if you want to create a new file.`,
+            error: `File not found at "${targetPath}". Use file_writer if you want to create a new file or directory_lister to find existing files.`,
             success: false,
           };
         }
+        safePath = diskPath;
+        resolvedFilePath = path.relative(ROOT_WORKSPACE, diskPath);
+        raw = await fs.readFile(safePath, "utf-8");
       }
 
       if (!targetContent) {
@@ -316,34 +387,74 @@ export const filePatcherTool: AgentTool<typeof filePatcherSchema> = {
         };
       }
 
-      const occurrences = raw.split(targetContent).length - 1;
+      // 1. Exact match attempt
+      let searchTarget = targetContent;
+      let occurrences = raw.split(searchTarget).length - 1;
+
+      // 2. Fallback: Strip surrounding quotes if model passed literal quotes (e.g. 'in harmony' -> in harmony)
+      if (occurrences === 0 && /^['"`].*['"`]$/.test(searchTarget)) {
+        const unquoted = searchTarget.slice(1, -1);
+        if (raw.includes(unquoted)) {
+          searchTarget = unquoted;
+          occurrences = raw.split(searchTarget).length - 1;
+        }
+      }
+
+      // 3. Fallback: Normalize CRLF (Windows) to LF if matching failed
+      if (occurrences === 0) {
+        const rawLF = raw.replace(/\r\n/g, "\n");
+        const targetLF = searchTarget.replace(/\r\n/g, "\n");
+        if (rawLF.includes(targetLF)) {
+          raw = rawLF;
+          searchTarget = targetLF;
+          occurrences = raw.split(searchTarget).length - 1;
+        }
+      }
+
+      // 4. Fallback: Trim trailing/leading whitespace if present
+      if (
+        occurrences === 0 &&
+        searchTarget.trim() &&
+        raw.includes(searchTarget.trim())
+      ) {
+        searchTarget = searchTarget.trim();
+        occurrences = raw.split(searchTarget).length - 1;
+      }
 
       if (occurrences === 0) {
         return {
-          error: `targetContent not found in "${targetPath}". Ensure exact whitespace, indentation, and casing match the target file.`,
+          error: `targetContent not found in "${resolvedFilePath}". Check file content with file_reader first to inspect the exact text.`,
           success: false,
         };
       }
 
       if (occurrences > 1 && !allowMultiple) {
         return {
-          error: `targetContent matched ${occurrences} times in "${targetPath}". Provide more surrounding context to match a unique block, or set allowMultiple: true.`,
+          error: `targetContent matched ${occurrences} times in "${resolvedFilePath}". Provide more surrounding context to match a unique block, or set allowMultiple: true.`,
           success: false,
         };
       }
 
       const updated = allowMultiple
-        ? raw.replaceAll(targetContent, replacementContent)
-        : raw.replace(targetContent, replacementContent);
+        ? raw.replaceAll(searchTarget, replacementContent)
+        : raw.replace(searchTarget, replacementContent);
 
-      await fs.writeFile(safePath, updated, "utf-8");
+      if (safePath) {
+        await fs.writeFile(safePath, updated, "utf-8");
+      }
+
+      if (context?.localFiles) {
+        context.localFiles[resolvedFilePath] = updated;
+        context.localFiles[path.basename(resolvedFilePath)] = updated;
+      }
 
       return {
-        path: path.relative(ROOT_WORKSPACE, safePath),
+        path: resolvedFilePath,
         success: true,
         replacementsMade: allowMultiple ? occurrences : 1,
         bytesBefore: Buffer.byteLength(raw, "utf-8"),
         bytesAfter: Buffer.byteLength(updated, "utf-8"),
+        message: `Successfully patched "${resolvedFilePath}".`,
       };
     } catch (err: any) {
       return {

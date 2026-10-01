@@ -103,6 +103,7 @@ export class AgentEngine {
       const allToolCallsExecuted: any[] = [];
       const allToolResultsRecorded: ToolResult[] = [];
       const writtenPathsInRun = new Set<string>();
+      const failedCallsCount = new Map<string, number>();
 
       // 3. ReAct Execution Loop (Step-by-step reasoning & action)
       while (stepsExecuted < env.MAX_REACT_STEPS) {
@@ -140,6 +141,14 @@ export class AgentEngine {
           const currentStepResults: ToolResult[] = [];
 
           for (const tc of step.toolCalls) {
+            const callSig = `${tc.name}:${JSON.stringify(tc.arguments || {})}`;
+            const failCount = failedCallsCount.get(callSig) || 0;
+
+            if (failCount >= 2) {
+              finalAnswer = `Execution stopped: The tool call "${tc.name}" failed repeatedly with identical arguments. Please inspect the workspace or verify that the target file and content exist.`;
+              break;
+            }
+
             allToolCallsExecuted.push(tc);
 
             emit({
@@ -166,6 +175,15 @@ export class AgentEngine {
               }
             }
 
+            // Prevent repetitive file_patcher loop on the same file once patched
+            if (tc.name === "file_patcher") {
+              const targetPath = tc.arguments?.path;
+              if (targetPath && writtenPathsInRun.has(`patched:${targetPath}`)) {
+                finalAnswer = `I have successfully updated "${targetPath}".`;
+                break;
+              }
+            }
+
             // Execute through tool registry with self-correction & audit logging
             const result = await this.registry.executeTool(
               tc.name,
@@ -173,6 +191,12 @@ export class AgentEngine {
               tc.arguments,
               context,
             );
+
+            if (result.isError) {
+              failedCallsCount.set(callSig, failCount + 1);
+            } else if (tc.name === "file_patcher" && tc.arguments?.path) {
+              writtenPathsInRun.add(`patched:${tc.arguments.path}`);
+            }
 
             currentStepResults.push(result);
             allToolResultsRecorded.push(result);

@@ -152,6 +152,63 @@ test("filePatcherTool: surgical search-and-replace edits", async () => {
   );
   assert.equal(finalRead.content, "qux bar qux baz");
 
+  // 5. Surgical text deletion when replacementContent is omitted (defaults to "")
+  const parsedArgs = filePatcherTool.parameters.parse({
+    path: multiFile,
+    targetContent: "qux bar ",
+  });
+  assert.equal(parsedArgs.replacementContent, "");
+
+  const deleteRes = await filePatcherTool.execute(parsedArgs, mockContext);
+  assert.equal(deleteRes.success, true);
+
+  const afterDeleteRead = await fileReaderTool.execute(
+    { path: multiFile, maxLines: 10 },
+    mockContext,
+  );
+  assert.equal(afterDeleteRead.content, "qux baz");
+
+  // 6. Quoted targetContent matching (e.g., "'in harmony'" matching "in harmony")
+  const harmonyFile = "scratch/test-file-ops/harmony.txt";
+  await fileWriterTool.execute(
+    { path: harmonyFile, content: "Living in harmony", overwrite: true },
+    mockContext,
+  );
+  const harmonyRes = await filePatcherTool.execute(
+    {
+      path: harmonyFile,
+      targetContent: "'in harmony'",
+      replacementContent: "at peace",
+    },
+    mockContext,
+  );
+  assert.equal(harmonyRes.success, true);
+
+  const afterHarmonyRead = await fileReaderTool.execute(
+    { path: harmonyFile, maxLines: 10 },
+    mockContext,
+  );
+  assert.equal(afterHarmonyRead.content, "Living at peace");
+
+  // 7. Fuzzy matching on client localFiles (e.g. "Muskan" matching "Muskan.txt")
+  const clientContext = {
+    ...mockContext,
+    localFiles: {
+      "Muskan.txt": "Line 1 in harmony",
+    },
+  };
+  const fuzzyPatchRes = await filePatcherTool.execute(
+    {
+      path: "Muskan",
+      targetContent: " in harmony",
+      replacementContent: "",
+    },
+    clientContext,
+  );
+  assert.equal(fuzzyPatchRes.success, true);
+  assert.equal(fuzzyPatchRes.path, "Muskan.txt");
+  assert.equal(clientContext.localFiles["Muskan.txt"], "Line 1");
+
   // Cleanup
   await fs.rm(TEST_DIR, { recursive: true, force: true });
 });
