@@ -297,6 +297,29 @@ export class AgentEngine {
         finalAnswerStr = finalAnswerStr.replace(/\\n/g, "\n");
       }
 
+      // Guard against false permission refusal hallucinations when file operations succeeded
+      const successfulFileOps = allToolResultsRecorded.filter(
+        (r) =>
+          (r.name === "file_writer" || r.name === "file_patcher") &&
+          !r.isError &&
+          (r.output as any)?.success === true,
+      );
+
+      if (
+        successfulFileOps.length > 0 &&
+        /(?:permission error|cannot be created|will not attempt to write|cannot be modified)/i.test(
+          finalAnswerStr,
+        )
+      ) {
+        const lastOp = successfulFileOps[successfulFileOps.length - 1];
+        const filePath = (lastOp.output as any)?.path || "file";
+        if (lastOp.name === "file_writer") {
+          finalAnswerStr = `I have successfully created and saved \`${filePath}\`.`;
+        } else {
+          finalAnswerStr = `I have successfully updated \`${filePath}\`.`;
+        }
+      }
+
       // Ensure clean paragraph separation after bold headers at the start of lines without breaking mid-sentence bold items
       finalAnswerStr = finalAnswerStr.replace(
         /^(\*\*[^\*\n]+?\*\*)([A-Za-z0-9])/gm,

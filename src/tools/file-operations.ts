@@ -109,11 +109,15 @@ export async function findOnDiskWithExtensions(
 // -----------------------------------------------------------------------------
 const fileWriterSchema = z.object({
   path: z
+    .coerce
     .string()
     .describe(
       "Relative path of the file to create or write, e.g. 'src/utils/math.ts' or 'notes.txt'",
     ),
-  content: z.string().describe("Text or code content to write to the file"),
+  content: z
+    .coerce
+    .string()
+    .describe("Text or code content to write to the file"),
   overwrite: z
     .boolean()
     .default(true)
@@ -321,14 +325,17 @@ export const directoryListerTool: AgentTool<typeof directoryListerSchema> = {
 // -----------------------------------------------------------------------------
 const filePatcherSchema = z.object({
   path: z
+    .coerce
     .string()
     .describe("Relative path of the file to modify within the workspace"),
   targetContent: z
+    .coerce
     .string()
     .describe(
       "The exact contiguous block of code/text to find and replace. Must match existing text in the file.",
     ),
   replacementContent: z
+    .coerce
     .string()
     .default("")
     .describe(

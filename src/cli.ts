@@ -37,7 +37,13 @@ function formatToolCallInfo(tool: string, args: Record<string, any>): string {
     return `"${args.path || ""}", ${bytes} B`;
   }
   if (tool === "file_patcher") {
-    return `"${args.path || ""}"`;
+    const target =
+      args.targetContent ?? args.find ?? args.search ?? args.from ?? "";
+    const repl =
+      args.replacementContent ?? args.replace ?? args.to ?? "";
+    const targetSnippet =
+      target !== "" ? `, '${target}' -> '${repl}'` : "";
+    return `"${args.path || args.file || ""}"${targetSnippet}`;
   }
   if (tool === "file_reader") {
     return `"${args.path || ""}"`;
@@ -251,7 +257,35 @@ async function syncClientWorkspaceTool(
         };
       }
       const raw = await fs.readFile(targetFile, "utf-8");
-      const { targetContent, replacementContent = "", allowMultiple } = args;
+      const rawTarget =
+        args.targetContent ??
+        args.find ??
+        args.search ??
+        args.old ??
+        args.from ??
+        args.target ??
+        args.text;
+      const rawReplacement =
+        args.replacementContent ??
+        args.replace ??
+        args.to ??
+        args.new ??
+        args.replacement ??
+        args.with ??
+        "";
+      const allowMultiple = Boolean(args.allowMultiple);
+      const replacementContent =
+        rawReplacement !== undefined && rawReplacement !== null
+          ? String(rawReplacement)
+          : "";
+
+      if (rawTarget === undefined || rawTarget === null) {
+        return {
+          success: false,
+          message: "Target content to replace was not provided",
+        };
+      }
+      const targetContent = String(rawTarget);
 
       // Match with quotes or CRLF normalization
       let searchTarget = targetContent;
