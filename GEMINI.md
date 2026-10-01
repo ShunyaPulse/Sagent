@@ -1,4 +1,4 @@
-# Sagent - Project Guidelines & Standing Rules
+# Sagentic - Project Guidelines & Standing Rules
 
 ## 1. Communication Style
 
