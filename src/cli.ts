@@ -3,7 +3,15 @@ import { exec } from "node:child_process";
 import fsSync, { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { env, reloadEnv } from "./config/env.js";
+
+const require = createRequire(import.meta.url);
+let VERSION = "1.0.9";
+try {
+  const pkg = require("../package.json");
+  if (pkg && pkg.version) VERSION = pkg.version;
+} catch {}
 
 // Suppress pg-connection-string security warning
 process.on("warning", (warning) => {
@@ -589,11 +597,11 @@ export async function runCli(): Promise<void> {
       ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
       : "Base 8B";
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.8 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv${VERSION} [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   } else {
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.8 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv${VERSION} (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   }
 
