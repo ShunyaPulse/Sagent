@@ -24,13 +24,21 @@ export function resolveSafePath(targetPath: string): string {
     ? normalized
     : path.resolve(ROOT_WORKSPACE, normalized);
 
-  if (!absolutePath.startsWith(ROOT_WORKSPACE)) {
+  // Reject any path outside the workspace root. Using path.relative (instead of a
+  // naive string prefix check) closes the sibling-prefix bypass where a path like
+  // "/workspace-evil/x" would wrongly pass a startsWith("/workspace") test.
+  const relativeFromRoot = path.relative(ROOT_WORKSPACE, absolutePath);
+  if (
+    relativeFromRoot &&
+    (relativeFromRoot === ".." ||
+      relativeFromRoot.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeFromRoot))
+  ) {
     throw new Error(
       `Access Denied: Path traversal detected. "${targetPath}" is outside the authorized workspace.`,
     );
   }
 
-  const relativeFromRoot = path.relative(ROOT_WORKSPACE, absolutePath);
   for (const pattern of PROTECTED_PATTERNS) {
     if (
       pattern.test(relativeFromRoot) ||
@@ -321,7 +329,196 @@ export const directoryListerTool: AgentTool<typeof directoryListerSchema> = {
 };
 
 // -----------------------------------------------------------------------------
-// 4. File Patcher Tool (Surgical Search & Replace)
+// 4. File Editor Tool
+// -----------------------------------------------------------------------------
+const fileEditorSchema = z.object({
+  path: z.string().describe("Relative path of the existing file to edit"),
+  operation: z
+    .enum(["replace", "insert", "delete", "append", "prepend"])
+    .describe(
+      "Edit to apply: 'replace' first matching text, 'insert' new text at a line, 'delete' lines, 'append'/'prepend' text at a file boundary",
+    ),
+  oldText: z
+    .string()
+    .optional()
+    .describe("Exact existing text to find (required for 'replace')"),
+  newText: z
+    .string()
+    .optional()
+    .describe(
+      "Replacement or inserted text (required for replace/insert/append/prepend; may be empty for 'replace' to delete the match)",
+    ),
+  line: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe("1-based line number (required for 'insert' and 'delete')"),
+  count: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .default(1)
+    .describe("Number of lines to remove for 'delete' (default 1)"),
+  replaceAll: z
+    .boolean()
+    .default(false)
+    .describe("Replace every occurrence for 'replace' (default: require a unique match)"),
+});
+
+export const fileEditorTool: AgentTool<typeof fileEditorSchema> = {
+  name: "file_editor",
+  description:
+    "Edits an existing file in the workspace using precise replace, insert, delete, append, or prepend operations.",
+  parameters: fileEditorSchema,
+  execute: async (
+    {
+      path: targetPath,
+      operation,
+      oldText,
+      newText,
+      line,
+      count,
+      replaceAll,
+    },
+    context,
+  ) => {
+    const fail = (error: string) => ({ error, path: targetPath, success: false });
+
+    try {
+      // 1. Check client workspace snapshot first (exact, case-insensitive, or extension-agnostic)
+      const localMatch = findInLocalFiles(context?.localFiles, targetPath);
+      let raw: string;
+      let resolvedFilePath = targetPath;
+      let safePath: string | null = null;
+
+      if (localMatch) {
+        raw = localMatch.content;
+        resolvedFilePath = localMatch.matchedPath;
+      } else {
+        safePath = resolveSafePath(targetPath);
+        const diskPath = await findOnDiskWithExtensions(safePath);
+        if (!diskPath) {
+          return fail(
+            `File not found at "${targetPath}". Use the file_writer tool to create it first.`,
+          );
+        }
+        safePath = diskPath;
+        resolvedFilePath = path.relative(ROOT_WORKSPACE, diskPath);
+        raw = await fs.readFile(safePath, "utf-8");
+      }
+
+      let updated = raw;
+      let linesChanged = 0;
+
+      if (operation === "replace") {
+        if (!oldText) {
+          return fail("'replace' requires a non-empty 'oldText'.");
+        }
+        if (typeof newText !== "string") {
+          return fail(
+            "'replace' requires 'newText' (use an empty string to delete the matched text).",
+          );
+        }
+
+        const occurrences = raw.split(oldText).length - 1;
+        if (occurrences === 0) {
+          return fail(`Could not find 'oldText' in "${targetPath}".`);
+        }
+        if (occurrences > 1 && !replaceAll) {
+          return fail(
+            `'oldText' matched ${occurrences} times in "${targetPath}". Provide more surrounding context or set replaceAll: true.`,
+          );
+        }
+
+        updated = replaceAll
+          ? raw.split(oldText).join(newText)
+          : raw.replace(oldText, newText);
+        linesChanged = replaceAll ? occurrences : 1;
+      } else if (operation === "insert") {
+        if (typeof newText !== "string") {
+          return fail("'insert' requires 'newText'.");
+        }
+        if (line === undefined) {
+          return fail("'insert' requires a 1-based 'line'.");
+        }
+
+        const lines = raw.split("\n");
+        if (line > lines.length + 1) {
+          return fail(
+            `Line ${line} is out of range: "${targetPath}" has ${lines.length} lines.`,
+          );
+        }
+
+        const inserted = newText.split("\n");
+        lines.splice(line - 1, 0, ...inserted);
+        updated = lines.join("\n");
+        linesChanged = inserted.length;
+      } else if (operation === "delete") {
+        if (line === undefined) {
+          return fail("'delete' requires a 1-based 'line'.");
+        }
+
+        const lines = raw.split("\n");
+        if (line > lines.length) {
+          return fail(
+            `Line ${line} is out of range: "${targetPath}" has ${lines.length} lines.`,
+          );
+        }
+
+        const removed = lines.splice(line - 1, count);
+        updated = lines.join("\n");
+        linesChanged = removed.length;
+      } else {
+        if (typeof newText !== "string") {
+          return fail(`'${operation}' requires 'newText'.`);
+        }
+
+        if (operation === "append") {
+          updated = raw + (raw.length > 0 && !raw.endsWith("\n") ? "\n" : "") + newText;
+        } else {
+          updated = newText + raw;
+        }
+        linesChanged = newText.split("\n").length;
+      }
+
+      if (updated === raw) {
+        return {
+          path: resolvedFilePath,
+          operation,
+          changed: false,
+          message: "Edit produced no change to the file.",
+          success: true,
+        };
+      }
+
+      if (safePath) {
+        await fs.writeFile(safePath, updated, "utf-8");
+      }
+
+      if (context?.localFiles) {
+        context.localFiles[resolvedFilePath] = updated;
+        context.localFiles[path.basename(resolvedFilePath)] = updated;
+      }
+
+      return {
+        path: resolvedFilePath,
+        operation,
+        changed: true,
+        linesChanged,
+        totalLines: updated.split("\n").length,
+        bytesWritten: Buffer.byteLength(updated, "utf-8"),
+        success: true,
+      };
+    } catch (err: any) {
+      return fail(err.message);
+    }
+  },
+};
+
+// -----------------------------------------------------------------------------
+// 5. File Patcher Tool (Surgical Search & Replace)
 // -----------------------------------------------------------------------------
 const filePatcherSchema = z.object({
   path: z

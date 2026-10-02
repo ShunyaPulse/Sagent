@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { toolParametersToJsonSchema } from "../tools/schema.js";
 import {
   LLMProvider,
   Message,
@@ -29,9 +29,7 @@ export class GeminiProvider implements LLMProvider {
     systemInstruction: string,
   ): Promise<StepOutput> {
     const functionDeclarations = tools.map((t) => {
-      const jsonSchema = zodToJsonSchema(t.parameters, {
-        target: "openApi3",
-      }) as any;
+      const jsonSchema = toolParametersToJsonSchema(t.parameters);
       return {
         name: t.name,
         description: t.description,
