@@ -106,6 +106,14 @@ Response:
   "arguments": { "path": "abc", "operation": "replace", "oldText": "foo", "newText": "bar" }
 }
 
+User: "delete last line from qwerty file"
+Response:
+{
+  "thought": "User wants to delete the last line of 'qwerty'. I will invoke file_editor with operation='delete' and line=-1.",
+  "tool": "file_editor",
+  "arguments": { "path": "qwerty", "operation": "delete", "line": -1, "count": 1 }
+}
+
 User: "replace artificial intelligence with AI"
 Response:
 {

@@ -333,7 +333,9 @@ export class AgentEngine {
       // Guard against false permission refusal hallucinations when file operations succeeded
       const successfulFileOps = allToolResultsRecorded.filter(
         (r) =>
-          (r.name === "file_writer" || r.name === "file_patcher") &&
+          (r.name === "file_writer" ||
+            r.name === "file_patcher" ||
+            r.name === "file_editor") &&
           !r.isError &&
           (r.output as any)?.success === true,
       );

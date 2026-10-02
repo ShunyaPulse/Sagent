@@ -323,6 +323,109 @@ async function syncClientWorkspaceTool(
         message: "Target content not matched in local file",
       };
     }
+
+    if (tool === "file_editor") {
+      let targetFile = safePath;
+      if (!fsSync.existsSync(targetFile)) {
+        const dir = path.dirname(safePath);
+        const baseName = path.basename(safePath).toLowerCase();
+        try {
+          const files = fsSync.readdirSync(dir);
+          const found = files.find(
+            (f) =>
+              f.toLowerCase() === baseName ||
+              path.parse(f).name.toLowerCase() === baseName,
+          );
+          if (found) {
+            targetFile = path.join(dir, found);
+          }
+        } catch {}
+      }
+
+      if (!fsSync.existsSync(targetFile)) {
+        return {
+          success: false,
+          message: `Local file not found: ${args.path}`,
+        };
+      }
+
+      const raw = await fs.readFile(targetFile, "utf-8");
+      const {
+        operation = "replace",
+        oldText,
+        newText = "",
+        line,
+        count = 1,
+        replaceAll = false,
+      } = args;
+
+      let updated = raw;
+      if (operation === "replace") {
+        if (!oldText) {
+          return { success: false, message: "'replace' requires 'oldText'" };
+        }
+        let searchTarget = String(oldText);
+        let matches = raw.includes(searchTarget);
+        if (!matches && /^['"`].*['"`]$/.test(searchTarget)) {
+          const unquoted = searchTarget.slice(1, -1);
+          if (raw.includes(unquoted)) {
+            searchTarget = unquoted;
+            matches = true;
+          }
+        }
+        if (!matches) {
+          const rawLF = raw.replace(/\r\n/g, "\n");
+          const targetLF = searchTarget.replace(/\r\n/g, "\n");
+          if (rawLF.includes(targetLF)) {
+            searchTarget = targetLF;
+            matches = true;
+          }
+        }
+        if (!matches) {
+          return {
+            success: false,
+            message: `Could not find '${oldText}' in ${args.path}`,
+          };
+        }
+        updated = replaceAll
+          ? raw.replaceAll(searchTarget, String(newText))
+          : raw.replace(searchTarget, String(newText));
+      } else if (operation === "insert") {
+        const lines = raw.split("\n");
+        let idx = typeof line === "number" ? line - 1 : lines.length;
+        if (typeof line === "number" && line < 0) {
+          idx = lines.length + line + 1;
+        }
+        if (idx < 0) idx = 0;
+        if (idx > lines.length) idx = lines.length;
+        const inserted = String(newText).split("\n");
+        lines.splice(idx, 0, ...inserted);
+        updated = lines.join("\n");
+      } else if (operation === "delete") {
+        const lines = raw.split("\n");
+        if (lines.length > 0) {
+          let idx = typeof line === "number" ? line - 1 : lines.length - 1;
+          if (typeof line === "number" && line < 0) {
+            idx = lines.length + line;
+          }
+          if (idx >= 0 && idx < lines.length) {
+            lines.splice(idx, count);
+          }
+        }
+        updated = lines.join("\n");
+      } else if (operation === "append") {
+        updated =
+          raw +
+          (raw.length > 0 && !raw.endsWith("\n") ? "\n" : "") +
+          String(newText);
+      } else if (operation === "prepend") {
+        updated = String(newText) + raw;
+      }
+
+      await fs.writeFile(targetFile, updated, "utf-8");
+      const relPath = path.relative(process.cwd(), targetFile) || args.path;
+      return { success: true, message: `Edited locally: ${relPath}` };
+    }
   } catch (err: any) {
     return { success: false, message: err.message };
   }
@@ -451,7 +554,11 @@ function handleStreamEvent(event: any, state: StreamState) {
     );
 
     // Synchronize workspace files directly to the user's local disk
-    if (event.tool === "file_writer" || event.tool === "file_patcher") {
+    if (
+      event.tool === "file_writer" ||
+      event.tool === "file_patcher" ||
+      event.tool === "file_editor"
+    ) {
       syncClientWorkspaceTool(event.tool, event.args).then((res) => {
         if (res.success && res.message) {
           console.log(

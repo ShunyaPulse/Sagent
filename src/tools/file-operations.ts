@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { AgentTool } from "../core/types.js";
@@ -351,9 +351,10 @@ const fileEditorSchema = z.object({
   line: z.coerce
     .number()
     .int()
-    .min(1)
     .optional()
-    .describe("1-based line number (required for 'insert' and 'delete')"),
+    .describe(
+      "Line number to target (1-based index, or -1 for the last line of the file; defaults to -1 for 'delete')",
+    ),
   count: z.coerce
     .number()
     .int()
@@ -396,6 +397,12 @@ export const fileEditorTool: AgentTool<typeof fileEditorSchema> = {
       if (localMatch) {
         raw = localMatch.content;
         resolvedFilePath = localMatch.matchedPath;
+        try {
+          const resolved = resolveSafePath(resolvedFilePath);
+          if (existsSync(resolved)) {
+            safePath = resolved;
+          }
+        } catch {}
       } else {
         safePath = resolveSafePath(targetPath);
         const diskPath = await findOnDiskWithExtensions(safePath);
@@ -440,34 +447,39 @@ export const fileEditorTool: AgentTool<typeof fileEditorSchema> = {
         if (typeof newText !== "string") {
           return fail("'insert' requires 'newText'.");
         }
-        if (line === undefined) {
-          return fail("'insert' requires a 1-based 'line'.");
-        }
-
         const lines = raw.split("\n");
-        if (line > lines.length + 1) {
+        let targetLine = line === undefined ? lines.length + 1 : line;
+        if (targetLine < 0) {
+          targetLine = lines.length + targetLine + 2;
+        }
+        if (targetLine < 1 || targetLine > lines.length + 1) {
           return fail(
             `Line ${line} is out of range: "${targetPath}" has ${lines.length} lines.`,
           );
         }
 
         const inserted = newText.split("\n");
-        lines.splice(line - 1, 0, ...inserted);
+        lines.splice(targetLine - 1, 0, ...inserted);
         updated = lines.join("\n");
         linesChanged = inserted.length;
       } else if (operation === "delete") {
-        if (line === undefined) {
-          return fail("'delete' requires a 1-based 'line'.");
+        const lines = raw.split("\n");
+        if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
+          return fail(`"${targetPath}" is already empty.`);
         }
 
-        const lines = raw.split("\n");
-        if (line > lines.length) {
+        let targetLine = line === undefined ? lines.length : line;
+        if (targetLine < 0) {
+          targetLine = lines.length + targetLine + 1;
+        }
+
+        if (targetLine < 1 || targetLine > lines.length) {
           return fail(
             `Line ${line} is out of range: "${targetPath}" has ${lines.length} lines.`,
           );
         }
 
-        const removed = lines.splice(line - 1, count);
+        const removed = lines.splice(targetLine - 1, count);
         updated = lines.join("\n");
         linesChanged = removed.length;
       } else {
@@ -570,6 +582,12 @@ export const filePatcherTool: AgentTool<typeof filePatcherSchema> = {
       if (localMatch) {
         raw = localMatch.content;
         resolvedFilePath = localMatch.matchedPath;
+        try {
+          const resolved = resolveSafePath(resolvedFilePath);
+          if (existsSync(resolved)) {
+            safePath = resolved;
+          }
+        } catch {}
       } else {
         safePath = resolveSafePath(targetPath);
         const diskPath = await findOnDiskWithExtensions(safePath);

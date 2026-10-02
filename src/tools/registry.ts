@@ -89,7 +89,8 @@ export class ToolRegistry {
     if (
       toolName === "file_writer" ||
       toolName === "file_reader" ||
-      toolName === "file_patcher"
+      toolName === "file_patcher" ||
+      toolName === "file_editor"
     ) {
       if (!normalizedArgs.path) {
         normalizedArgs.path =
