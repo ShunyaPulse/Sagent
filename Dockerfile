@@ -26,8 +26,14 @@ ENV NODE_ENV=production
 ENV PORT=8080
 ENV HOST=0.0.0.0
 
+# Security: Apply latest Alpine OS security updates (e.g. libcrypto3 patches)
+RUN apk upgrade --no-cache
+
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
+
+# Security Hardening: Remove package managers from production container to eliminate unused library CVEs
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /opt/yarn*
 
 # Copy compiled JavaScript output and migration SQL schemas
 COPY --from=builder /app/dist ./dist

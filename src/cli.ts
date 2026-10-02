@@ -3,7 +3,15 @@ import { exec } from "node:child_process";
 import fsSync, { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { env, reloadEnv } from "./config/env.js";
+
+const require = createRequire(import.meta.url);
+let VERSION = "1.0.9";
+try {
+  const pkg = require("../package.json");
+  if (pkg && pkg.version) VERSION = pkg.version;
+} catch {}
 
 // Suppress pg-connection-string security warning
 process.on("warning", (warning) => {
@@ -31,6 +39,15 @@ function formatToolCallInfo(tool: string, args: Record<string, any>): string {
   if (tool === "file_editor") {
     const target = args.line ? `:${args.line}` : "";
     return `"${args.path || ""}"${target} (${args.operation || "edit"})`;
+  }
+  if (tool === "file_patcher") {
+    const target =
+      args.targetContent ?? args.find ?? args.search ?? args.from ?? "";
+    const repl =
+      args.replacementContent ?? args.replace ?? args.to ?? "";
+    const targetSnippet =
+      target !== "" ? `, '${target}' -> '${repl}'` : "";
+    return `"${args.path || args.file || ""}"${targetSnippet}`;
   }
   if (tool === "file_reader") {
     return `"${args.path || ""}"`;
@@ -169,6 +186,250 @@ interface StreamState {
   currentTools: any[];
 }
 
+function resolveLocalSafePath(targetPath: string): string | null {
+  const cwd = process.cwd();
+  const normalized = path.normalize(targetPath).trim();
+  const absolutePath = path.isAbsolute(normalized)
+    ? normalized
+    : path.resolve(cwd, normalized);
+
+  if (!absolutePath.startsWith(cwd)) {
+    return null;
+  }
+
+  const base = path.basename(absolutePath);
+  if (
+    /^\.env/i.test(base) ||
+    /^\.git/i.test(base) ||
+    /\.key$/i.test(base) ||
+    /\.pem$/i.test(base)
+  ) {
+    return null;
+  }
+
+  return absolutePath;
+}
+
+async function syncClientWorkspaceTool(
+  tool: string,
+  args: Record<string, any>,
+): Promise<{ success: boolean; message?: string }> {
+  if (!args || !args.path) return { success: false };
+  const safePath = resolveLocalSafePath(args.path);
+  if (!safePath) {
+    return {
+      success: false,
+      message: `Access restricted for path: ${args.path}`,
+    };
+  }
+
+  try {
+    if (tool === "file_writer") {
+      await fs.mkdir(path.dirname(safePath), { recursive: true });
+      if (args.append) {
+        await fs.appendFile(safePath, args.content || "", "utf-8");
+      } else {
+        await fs.writeFile(safePath, args.content || "", "utf-8");
+      }
+      const relPath = path.relative(process.cwd(), safePath) || args.path;
+      return { success: true, message: `Saved locally to: ${relPath}` };
+    }
+
+    if (tool === "file_patcher") {
+      let targetFile = safePath;
+      if (!fsSync.existsSync(targetFile)) {
+        // Fallback: search directory for case-insensitive or extension match
+        const dir = path.dirname(safePath);
+        const baseName = path.basename(safePath).toLowerCase();
+        try {
+          const files = fsSync.readdirSync(dir);
+          const found = files.find(
+            (f) =>
+              f.toLowerCase() === baseName ||
+              path.parse(f).name.toLowerCase() === baseName,
+          );
+          if (found) {
+            targetFile = path.join(dir, found);
+          }
+        } catch {}
+      }
+
+      if (!fsSync.existsSync(targetFile)) {
+        return {
+          success: false,
+          message: `Local file not found: ${args.path}`,
+        };
+      }
+      const raw = await fs.readFile(targetFile, "utf-8");
+      const rawTarget =
+        args.targetContent ??
+        args.find ??
+        args.search ??
+        args.old ??
+        args.from ??
+        args.target ??
+        args.text;
+      const rawReplacement =
+        args.replacementContent ??
+        args.replace ??
+        args.to ??
+        args.new ??
+        args.replacement ??
+        args.with ??
+        "";
+      const allowMultiple = Boolean(args.allowMultiple);
+      const replacementContent =
+        rawReplacement !== undefined && rawReplacement !== null
+          ? String(rawReplacement)
+          : "";
+
+      if (rawTarget === undefined || rawTarget === null) {
+        return {
+          success: false,
+          message: "Target content to replace was not provided",
+        };
+      }
+      const targetContent = String(rawTarget);
+
+      // Match with quotes or CRLF normalization
+      let searchTarget = targetContent;
+      let matches = raw.includes(searchTarget);
+      if (!matches && /^['"`].*['"`]$/.test(searchTarget)) {
+        const unquoted = searchTarget.slice(1, -1);
+        if (raw.includes(unquoted)) {
+          searchTarget = unquoted;
+          matches = true;
+        }
+      }
+      if (!matches) {
+        const rawLF = raw.replace(/\r\n/g, "\n");
+        const targetLF = searchTarget.replace(/\r\n/g, "\n");
+        if (rawLF.includes(targetLF)) {
+          searchTarget = targetLF;
+          matches = true;
+        }
+      }
+
+      if (matches) {
+        const updated = allowMultiple
+          ? raw.replaceAll(searchTarget, replacementContent || "")
+          : raw.replace(searchTarget, replacementContent || "");
+        await fs.writeFile(targetFile, updated, "utf-8");
+        const relPath = path.relative(process.cwd(), targetFile) || args.path;
+        return { success: true, message: `Patched locally: ${relPath}` };
+      }
+      return {
+        success: false,
+        message: "Target content not matched in local file",
+      };
+    }
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
+
+  return { success: false };
+}
+
+async function getLocalWorkspaceContext(
+  userMessage: string,
+  activeFile?: string | null,
+): Promise<{
+  workspaceFiles: string[];
+  localFiles: Record<string, string>;
+  activeFile?: string;
+}> {
+  const cwd = process.cwd();
+  const workspaceFiles: string[] = [];
+  const localFiles: Record<string, string> = {};
+
+  try {
+    const entries = await fs.readdir(cwd, { withFileTypes: true });
+    const ignored = new Set([
+      "node_modules",
+      ".git",
+      "dist",
+      ".next",
+      ".cache",
+      ".sagentic",
+    ]);
+
+    for (const entry of entries) {
+      if (ignored.has(entry.name) || entry.name.startsWith(".env")) continue;
+      const name = entry.isDirectory() ? `${entry.name}/` : entry.name;
+      workspaceFiles.push(name);
+      if (workspaceFiles.length >= 40) break;
+    }
+
+    // 1. Scan direct top-level matches (supporting case-insensitive & extension-agnostic match)
+    const userMsgLower = userMessage.toLowerCase();
+    for (const entry of entries) {
+      if (entry.isFile() && !entry.name.startsWith(".env")) {
+        const nameLower = entry.name.toLowerCase();
+        const baseNameLower = path.parse(entry.name).name.toLowerCase();
+        if (
+          userMsgLower.includes(nameLower) ||
+          userMsgLower.includes(baseNameLower)
+        ) {
+          const filePath = path.join(cwd, entry.name);
+          try {
+            const stat = await fs.stat(filePath);
+            if (stat.size < 80000) {
+              const content = await fs.readFile(filePath, "utf-8");
+              localFiles[entry.name] = content;
+              localFiles[path.parse(entry.name).name] = content;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 2. Scan arbitrary relative paths in userMessage (e.g. scratch/test.txt)
+    const candidateTokens = userMessage.match(/[a-zA-Z0-9_\-\.\/\\~]+/g) || [];
+    for (const token of candidateTokens) {
+      if (token.includes("/") || token.includes("\\") || token.includes(".")) {
+        const norm = path.normalize(token).replace(/^[\\\/]+/, "");
+        const abs = path.resolve(cwd, norm);
+        if (
+          abs.startsWith(cwd) &&
+          !norm.startsWith(".env") &&
+          !norm.startsWith(".git")
+        ) {
+          try {
+            if (fsSync.existsSync(abs) && fsSync.statSync(abs).isFile()) {
+              const stat = fsSync.statSync(abs);
+              if (stat.size < 80000) {
+                const content = fsSync.readFileSync(abs, "utf-8");
+                localFiles[norm] = content;
+                localFiles[path.basename(norm)] = content;
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 3. Include active workspace file if present and not already loaded
+    if (activeFile) {
+      const activeAbs = path.resolve(cwd, activeFile);
+      if (
+        activeAbs.startsWith(cwd) &&
+        !activeFile.startsWith(".env") &&
+        !activeFile.startsWith(".git") &&
+        fsSync.existsSync(activeAbs) &&
+        fsSync.statSync(activeAbs).isFile()
+      ) {
+        try {
+          const content = fsSync.readFileSync(activeAbs, "utf-8");
+          localFiles[activeFile] = content;
+          localFiles[path.parse(activeFile).name] = content;
+        } catch {}
+      }
+    }
+  } catch {}
+
+  return { workspaceFiles, localFiles, activeFile: activeFile || undefined };
+}
+
 function handleStreamEvent(event: any, state: StreamState) {
   if (event.type === "thought") {
     if (
@@ -188,6 +449,17 @@ function handleStreamEvent(event: any, state: StreamState) {
     console.log(
       `\x1b[34m●\x1b[0m \x1b[1m${event.tool}\x1b[0m\x1b[90m(${details})\x1b[0m`,
     );
+
+    // Synchronize workspace files directly to the user's local disk
+    if (event.tool === "file_writer" || event.tool === "file_patcher") {
+      syncClientWorkspaceTool(event.tool, event.args).then((res) => {
+        if (res.success && res.message) {
+          console.log(
+            `  \x1b[90m└─\x1b[0m \x1b[32m✔ Local workspace:\x1b[0m \x1b[90m${res.message}\x1b[0m`,
+          );
+        }
+      });
+    }
   } else if (event.type === "tool_result") {
     const last = state.currentTools[state.currentTools.length - 1];
     if (last && last.tool === event.tool) {
@@ -196,8 +468,12 @@ function handleStreamEvent(event: any, state: StreamState) {
       last.isError = event.isError;
     }
     if (event.isError) {
+      const errDetail =
+        event.result?.error ||
+        (typeof event.result === "string" ? event.result : "");
+      const errSnippet = errDetail ? `: ${errDetail.slice(0, 80)}` : "";
       console.log(
-        `  \x1b[90m└─\x1b[0m \x1b[31m✖ Error\x1b[0m \x1b[90m(${event.durationMs}ms)\x1b[0m`,
+        `  \x1b[90m└─\x1b[0m \x1b[31m✖ Error\x1b[0m \x1b[90m(${event.durationMs}ms${errSnippet})\x1b[0m`,
       );
     } else {
       console.log(
@@ -236,12 +512,16 @@ async function runRemoteStream(
   userMessage: string,
   state: StreamState,
   abortSignal: AbortSignal,
+  activeFile?: string | null,
 ): Promise<{ latencyMs?: number; totalTokens?: number }> {
   const token =
     process.env.SAGENTIC_API_KEY ||
     process.env.AUTH_SECRET ||
     process.env.API_SECRET ||
     env.AUTH_SECRET;
+
+  const { workspaceFiles, localFiles, activeFile: resolvedActiveFile } =
+    await getLocalWorkspaceContext(userMessage, activeFile);
 
   const response = await fetch(remoteUrl, {
     method: "POST",
@@ -254,6 +534,9 @@ async function runRemoteStream(
       tenantId: "default",
       message: userMessage,
       stream: true,
+      workspaceFiles,
+      localFiles,
+      activeFile: resolvedActiveFile,
     }),
     signal: abortSignal,
   });
@@ -376,11 +659,11 @@ export async function runCli(): Promise<void> {
       ? `LoRA: ${env.CLOUDFLARE_LORA_NAME}`
       : "Base 8B";
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.4 [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv${VERSION} [Local Mode] (Tier 1: ${loraDisplay} ➔ Tier 2: Gemini Pool)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   } else {
     console.log(
-      `\x1b[1mSagentic\x1b[0m \x1b[90mv1.0.4 (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
+      `\x1b[1mSagentic\x1b[0m \x1b[90mv${VERSION} (Autonomous AI Platform ➔ Cloud Run)\x1b[0m\n\x1b[90mType \x1b[33m/help\x1b[90m for commands or ask anything.\x1b[0m\n`,
     );
   }
 
@@ -392,6 +675,7 @@ export async function runCli(): Promise<void> {
   let lastUserMessage = "";
   let lastAssistantAnswer = "";
   let lastToolExecutions: any[] = [];
+  let lastActiveFile: string | null = null;
 
   let isRunning = false;
   let activeAbortController: AbortController | null = null;
@@ -481,6 +765,7 @@ export async function runCli(): Promise<void> {
         lastAssistantAnswer = "";
         lastUserMessage = "";
         lastToolExecutions = [];
+        lastActiveFile = null;
         sessionHistory.length = 0;
         console.log("\x1b[32m✔ Session context cleared.\x1b[0m\n");
         ask();
@@ -529,8 +814,17 @@ export async function runCli(): Promise<void> {
 
       try {
         if (isLocalMode) {
+          const { workspaceFiles, localFiles, activeFile: resolvedActiveFile } =
+            await getLocalWorkspaceContext(trimmed, lastActiveFile);
           await engine.run({
-            context: { sessionId, tenantId, userIp: "127.0.0.1" },
+            context: {
+              sessionId,
+              tenantId,
+              userIp: "127.0.0.1",
+              workspaceFiles,
+              localFiles,
+              activeFile: resolvedActiveFile,
+            },
             userMessage: trimmed,
             provider,
             onEvent: (event: any) => handleStreamEvent(event, state),
@@ -542,7 +836,19 @@ export async function runCli(): Promise<void> {
             trimmed,
             state,
             activeAbortController.signal,
+            lastActiveFile,
           );
+        }
+
+        // Track last active file modified or created in this session
+        for (const tc of state.currentTools) {
+          const possiblePath =
+            tc.args?.path || tc.args?.file || tc.args?.filePath;
+          if (possiblePath && typeof possiblePath === "string") {
+            lastActiveFile = path
+              .normalize(possiblePath)
+              .replace(/^[\\\/]+/, "");
+          }
         }
 
         lastAssistantAnswer = state.currentAnswer;

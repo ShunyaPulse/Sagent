@@ -102,16 +102,22 @@ export class AgentEngine {
       let finalAnswer: string | undefined;
       const allToolCallsExecuted: any[] = [];
       const allToolResultsRecorded: ToolResult[] = [];
+      const writtenPathsInRun = new Set<string>();
+      const failedCallsCount = new Map<string, number>();
 
       // 3. ReAct Execution Loop (Step-by-step reasoning & action)
       while (stepsExecuted < env.MAX_REACT_STEPS) {
         stepsExecuted++;
 
         // Call active LLM Provider
+        const systemPromptWithContext = context.activeFile
+          ? `${AGENT_SYSTEM_PROMPT}\n\n[Active Workspace Context: Currently active file is "${context.activeFile}". If the user asks to modify, replace, or read text without mentioning a file, target this file.]`
+          : AGENT_SYSTEM_PROMPT;
+
         const step = await provider.generateStep(
           messages,
           this.registry.getAll(),
-          AGENT_SYSTEM_PROMPT,
+          systemPromptWithContext,
         );
 
         if (step.tokensUsed) {
@@ -139,6 +145,14 @@ export class AgentEngine {
           const currentStepResults: ToolResult[] = [];
 
           for (const tc of step.toolCalls) {
+            const callSig = `${tc.name}:${JSON.stringify(tc.arguments || {})}`;
+            const failCount = failedCallsCount.get(callSig) || 0;
+
+            if (failCount >= 2) {
+              finalAnswer = `Execution stopped: The tool call "${tc.name}" failed repeatedly with identical arguments. Please inspect the workspace or verify that the target file and content exist.`;
+              break;
+            }
+
             allToolCallsExecuted.push(tc);
 
             emit({
@@ -148,6 +162,32 @@ export class AgentEngine {
               callId: tc.id,
             });
 
+            // Prevent repetitive file_writer loop on the same file
+            if (tc.name === "file_writer") {
+              const targetPath = tc.arguments?.path;
+              const isAppend = Boolean(tc.arguments?.append);
+              if (
+                targetPath &&
+                writtenPathsInRun.has(targetPath) &&
+                !isAppend
+              ) {
+                finalAnswer = `I have successfully created and saved "${targetPath}".`;
+                break;
+              }
+              if (targetPath) {
+                writtenPathsInRun.add(targetPath);
+              }
+            }
+
+            // Prevent repetitive file_patcher loop on the same file once patched
+            if (tc.name === "file_patcher") {
+              const targetPath = tc.arguments?.path;
+              if (targetPath && writtenPathsInRun.has(`patched:${targetPath}`)) {
+                finalAnswer = `I have successfully updated "${targetPath}".`;
+                break;
+              }
+            }
+
             // Execute through tool registry with self-correction & audit logging
             const result = await this.registry.executeTool(
               tc.name,
@@ -155,6 +195,12 @@ export class AgentEngine {
               tc.arguments,
               context,
             );
+
+            if (result.isError) {
+              failedCallsCount.set(callSig, failCount + 1);
+            } else if (tc.name === "file_patcher" && tc.arguments?.path) {
+              writtenPathsInRun.add(`patched:${tc.arguments.path}`);
+            }
 
             currentStepResults.push(result);
             allToolResultsRecorded.push(result);
@@ -168,6 +214,14 @@ export class AgentEngine {
             });
           }
 
+          if (finalAnswer) {
+            emit({
+              type: "token",
+              text: finalAnswer,
+            });
+            break;
+          }
+
           // Feed tool observations back into the message history for the next reasoning step
           messages.push({
             role: "tool",
@@ -176,6 +230,35 @@ export class AgentEngine {
           });
 
           // Continue to next turn in ReAct loop
+          continue;
+        }
+
+        // If no tool calls, check if candidate answer falsely claims a file action occurred without executing any tool
+        const candidateAnswer =
+          step.finalAnswer ||
+          (step.thought && !step.toolCalls ? step.thought : "");
+        const isActionRequest =
+          /\b(?:replace|create|modify|write|patch|update|change|delete|remove|append)\b/i.test(
+            userMessage,
+          );
+        const claimsFileActionDone =
+          /(?:has been modified|has been created|has been updated|successfully replaced|successfully modified|successfully created|Action is complete)/i.test(
+            candidateAnswer,
+          );
+
+        if (
+          allToolCallsExecuted.length === 0 &&
+          isActionRequest &&
+          claimsFileActionDone &&
+          stepsExecuted < env.MAX_REACT_STEPS
+        ) {
+          const targetHint = context.activeFile
+            ? ` on active file "${context.activeFile}"`
+            : "";
+          messages.push({
+            role: "user",
+            content: `CRITICAL: You stated that the action is complete or file has been modified/created, but you did NOT call any tools! You CANNOT modify files through text alone. You MUST call "file_patcher" or "file_writer" now with the exact parameters to perform the requested change${targetHint}.`,
+          });
           continue;
         }
 
@@ -245,6 +328,42 @@ export class AgentEngine {
       // Convert literal \n to real newlines if string has unescaped escaped newlines
       if (finalAnswerStr.includes("\\n") && !finalAnswerStr.includes("\n")) {
         finalAnswerStr = finalAnswerStr.replace(/\\n/g, "\n");
+      }
+
+      // Guard against false permission refusal hallucinations when file operations succeeded
+      const successfulFileOps = allToolResultsRecorded.filter(
+        (r) =>
+          (r.name === "file_writer" || r.name === "file_patcher") &&
+          !r.isError &&
+          (r.output as any)?.success === true,
+      );
+
+      if (
+        successfulFileOps.length > 0 &&
+        /(?:permission error|cannot be created|will not attempt to write|cannot be modified)/i.test(
+          finalAnswerStr,
+        )
+      ) {
+        const lastOp = successfulFileOps[successfulFileOps.length - 1];
+        const filePath = (lastOp.output as any)?.path || "file";
+        if (lastOp.name === "file_writer") {
+          finalAnswerStr = `I have successfully created and saved \`${filePath}\`.`;
+        } else {
+          finalAnswerStr = `I have successfully updated \`${filePath}\`.`;
+        }
+      }
+
+      // If no tools were executed but final answer claims file was modified/created, override hallucination
+      if (
+        allToolCallsExecuted.length === 0 &&
+        /\b(?:replace|create|modify|write|patch|update|change|delete|remove|append)\b/i.test(
+          userMessage,
+        ) &&
+        /(?:has been modified|has been created|has been updated|successfully replaced|successfully modified|successfully created|Action is complete)/i.test(
+          finalAnswerStr,
+        )
+      ) {
+        finalAnswerStr = `Unable to modify file: no tools were executed. Please specify the target file name explicitly (e.g., 'replace X with Y in ${context.activeFile || "filename"}').`;
       }
 
       // Ensure clean paragraph separation after bold headers at the start of lines without breaking mid-sentence bold items

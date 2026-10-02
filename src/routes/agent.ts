@@ -26,6 +26,9 @@ const chatRequestSchema = z.object({
   stream: z.boolean().default(true),
   modelProvider: z.enum(["model-first", "gemini", "cloudflare"]).optional(),
   turnstileToken: z.string().optional(),
+  workspaceFiles: z.array(z.string()).optional(),
+  localFiles: z.record(z.string(), z.string()).optional(),
+  activeFile: z.string().optional(),
 });
 
 export async function agentRoutes(fastify: FastifyInstance) {
@@ -70,6 +73,9 @@ export async function agentRoutes(fastify: FastifyInstance) {
         stream,
         modelProvider,
         turnstileToken,
+        workspaceFiles,
+        localFiles,
+        activeFile,
       } = parseResult.data;
 
       const tokenToCheck =
@@ -103,6 +109,9 @@ export async function agentRoutes(fastify: FastifyInstance) {
         sessionId,
         tenantId,
         userIp: req.ip,
+        workspaceFiles,
+        localFiles,
+        activeFile,
       };
 
       try {

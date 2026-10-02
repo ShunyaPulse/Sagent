@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { AgentTool, AgentContext, ToolResult } from "../core/types.js";
 import { httpFetcherTool } from "./http-fetcher.js";
 import { sqlVectorSearchTool } from "./sql-vector-search.js";
@@ -8,6 +9,7 @@ import {
   fileReaderTool,
   directoryListerTool,
   fileEditorTool,
+  filePatcherTool,
 } from "./file-operations.js";
 import { query } from "../db/postgres.js";
 
@@ -23,6 +25,7 @@ export class ToolRegistry {
     this.register(fileReaderTool);
     this.register(fileEditorTool);
     this.register(directoryListerTool);
+    this.register(filePatcherTool);
   }
 
   register(tool: AgentTool<any>) {
@@ -58,8 +61,54 @@ export class ToolRegistry {
       };
     }
 
+    const normalizedArgs: Record<string, any> = { ...(rawArgs || {}) };
+
+    // 1. Normalize common LLM parameter aliases for file operations
+    if (toolName === "file_patcher") {
+      if (normalizedArgs.targetContent === undefined) {
+        normalizedArgs.targetContent =
+          normalizedArgs.find ??
+          normalizedArgs.search ??
+          normalizedArgs.old ??
+          normalizedArgs.from ??
+          normalizedArgs.target ??
+          normalizedArgs.text ??
+          normalizedArgs.original;
+      }
+      if (normalizedArgs.replacementContent === undefined) {
+        normalizedArgs.replacementContent =
+          normalizedArgs.replace ??
+          normalizedArgs.to ??
+          normalizedArgs.new ??
+          normalizedArgs.replacement ??
+          normalizedArgs.with ??
+          "";
+      }
+    }
+
+    if (
+      toolName === "file_writer" ||
+      toolName === "file_reader" ||
+      toolName === "file_patcher"
+    ) {
+      if (!normalizedArgs.path) {
+        normalizedArgs.path =
+          normalizedArgs.file ??
+          normalizedArgs.filename ??
+          normalizedArgs.filePath ??
+          normalizedArgs.targetPath;
+      }
+      if (!normalizedArgs.path && context.activeFile) {
+        normalizedArgs.path = context.activeFile;
+      }
+      // If path is still missing and only 1 file is in client workspace context, infer it
+      if (!normalizedArgs.path && context.workspaceFiles?.length === 1) {
+        normalizedArgs.path = context.workspaceFiles[0];
+      }
+    }
+
     try {
-      const parsedArgs = tool.parameters.parse(rawArgs);
+      const parsedArgs = tool.parameters.parse(normalizedArgs);
       const output = await tool.execute(parsedArgs, context);
       const durationMs = Date.now() - start;
 
@@ -82,13 +131,20 @@ export class ToolRegistry {
       };
     } catch (err: any) {
       const durationMs = Date.now() - start;
-      const errorMessage =
+      let errorMessage =
         err.message || "Tool execution encountered an unknown error";
+
+      if (err instanceof z.ZodError) {
+        const issues = err.issues.map(
+          (issue) => `${issue.path.join(".") || "parameter"}: ${issue.message}`,
+        );
+        errorMessage = `Invalid arguments for "${toolName}": ${issues.join("; ")}`;
+      }
 
       this.recordAuditLog(
         context.sessionId,
         toolName,
-        rawArgs,
+        normalizedArgs,
         { error: errorMessage },
         "failed",
         context.userIp,
