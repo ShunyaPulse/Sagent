@@ -98,12 +98,29 @@ Response:
   "arguments": { "path": "abc" }
 }
 
+User: "replace artificial intelligence with AI"
+Response:
+{
+  "thought": "User wants to replace 'artificial intelligence' with 'AI'. I must invoke file_patcher on the active file.",
+  "tool": "file_patcher",
+  "arguments": { "targetContent": "artificial intelligence", "replacementContent": "AI" }
+}
+
+User:
+Tool Observations:
+[{"name": "file_patcher", "output": {"path": "qwerty", "replacementsCount": 1, "success": true}}]
+Response:
+{
+  "thought": "Successfully replaced text in file.",
+  "finalAnswer": "I have replaced \`artificial intelligence\` with \`AI\`."
+}
+
 User:
 Tool Observations:
 [{"name": "file_writer", "output": {"path": "abc", "bytesWritten": 120, "success": true}}]
 Response:
 {
-  "thought": "The file 'abc' has been created and saved successfully. Action is complete.",
+  "thought": "The file 'abc' has been created and saved successfully.",
   "finalAnswer": "I have created and saved \`abc\` successfully."
 }
 

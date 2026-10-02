@@ -28,6 +28,7 @@ const chatRequestSchema = z.object({
   turnstileToken: z.string().optional(),
   workspaceFiles: z.array(z.string()).optional(),
   localFiles: z.record(z.string(), z.string()).optional(),
+  activeFile: z.string().optional(),
 });
 
 export async function agentRoutes(fastify: FastifyInstance) {
@@ -74,6 +75,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
         turnstileToken,
         workspaceFiles,
         localFiles,
+        activeFile,
       } = parseResult.data;
 
       const tokenToCheck =
@@ -109,6 +111,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
         userIp: req.ip,
         workspaceFiles,
         localFiles,
+        activeFile,
       };
 
       try {

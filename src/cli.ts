@@ -326,9 +326,13 @@ async function syncClientWorkspaceTool(
   return { success: false };
 }
 
-async function getLocalWorkspaceContext(userMessage: string): Promise<{
+async function getLocalWorkspaceContext(
+  userMessage: string,
+  activeFile?: string | null,
+): Promise<{
   workspaceFiles: string[];
   localFiles: Record<string, string>;
+  activeFile?: string;
 }> {
   const cwd = process.cwd();
   const workspaceFiles: string[] = [];
@@ -399,9 +403,27 @@ async function getLocalWorkspaceContext(userMessage: string): Promise<{
         }
       }
     }
+
+    // 3. Include active workspace file if present and not already loaded
+    if (activeFile) {
+      const activeAbs = path.resolve(cwd, activeFile);
+      if (
+        activeAbs.startsWith(cwd) &&
+        !activeFile.startsWith(".env") &&
+        !activeFile.startsWith(".git") &&
+        fsSync.existsSync(activeAbs) &&
+        fsSync.statSync(activeAbs).isFile()
+      ) {
+        try {
+          const content = fsSync.readFileSync(activeAbs, "utf-8");
+          localFiles[activeFile] = content;
+          localFiles[path.parse(activeFile).name] = content;
+        } catch {}
+      }
+    }
   } catch {}
 
-  return { workspaceFiles, localFiles };
+  return { workspaceFiles, localFiles, activeFile: activeFile || undefined };
 }
 
 function handleStreamEvent(event: any, state: StreamState) {
@@ -486,6 +508,7 @@ async function runRemoteStream(
   userMessage: string,
   state: StreamState,
   abortSignal: AbortSignal,
+  activeFile?: string | null,
 ): Promise<{ latencyMs?: number; totalTokens?: number }> {
   const token =
     process.env.SAGENTIC_API_KEY ||
@@ -493,8 +516,8 @@ async function runRemoteStream(
     process.env.API_SECRET ||
     env.AUTH_SECRET;
 
-  const { workspaceFiles, localFiles } =
-    await getLocalWorkspaceContext(userMessage);
+  const { workspaceFiles, localFiles, activeFile: resolvedActiveFile } =
+    await getLocalWorkspaceContext(userMessage, activeFile);
 
   const response = await fetch(remoteUrl, {
     method: "POST",
@@ -509,6 +532,7 @@ async function runRemoteStream(
       stream: true,
       workspaceFiles,
       localFiles,
+      activeFile: resolvedActiveFile,
     }),
     signal: abortSignal,
   });
@@ -647,6 +671,7 @@ export async function runCli(): Promise<void> {
   let lastUserMessage = "";
   let lastAssistantAnswer = "";
   let lastToolExecutions: any[] = [];
+  let lastActiveFile: string | null = null;
 
   let isRunning = false;
   let activeAbortController: AbortController | null = null;
@@ -736,6 +761,7 @@ export async function runCli(): Promise<void> {
         lastAssistantAnswer = "";
         lastUserMessage = "";
         lastToolExecutions = [];
+        lastActiveFile = null;
         sessionHistory.length = 0;
         console.log("\x1b[32m✔ Session context cleared.\x1b[0m\n");
         ask();
@@ -784,8 +810,17 @@ export async function runCli(): Promise<void> {
 
       try {
         if (isLocalMode) {
+          const { workspaceFiles, localFiles, activeFile: resolvedActiveFile } =
+            await getLocalWorkspaceContext(trimmed, lastActiveFile);
           await engine.run({
-            context: { sessionId, tenantId, userIp: "127.0.0.1" },
+            context: {
+              sessionId,
+              tenantId,
+              userIp: "127.0.0.1",
+              workspaceFiles,
+              localFiles,
+              activeFile: resolvedActiveFile,
+            },
             userMessage: trimmed,
             provider,
             onEvent: (event: any) => handleStreamEvent(event, state),
@@ -797,7 +832,19 @@ export async function runCli(): Promise<void> {
             trimmed,
             state,
             activeAbortController.signal,
+            lastActiveFile,
           );
+        }
+
+        // Track last active file modified or created in this session
+        for (const tc of state.currentTools) {
+          const possiblePath =
+            tc.args?.path || tc.args?.file || tc.args?.filePath;
+          if (possiblePath && typeof possiblePath === "string") {
+            lastActiveFile = path
+              .normalize(possiblePath)
+              .replace(/^[\\\/]+/, "");
+          }
         }
 
         lastAssistantAnswer = state.currentAnswer;

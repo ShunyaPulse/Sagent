@@ -96,6 +96,9 @@ export class ToolRegistry {
           normalizedArgs.filePath ??
           normalizedArgs.targetPath;
       }
+      if (!normalizedArgs.path && context.activeFile) {
+        normalizedArgs.path = context.activeFile;
+      }
       // If path is still missing and only 1 file is in client workspace context, infer it
       if (!normalizedArgs.path && context.workspaceFiles?.length === 1) {
         normalizedArgs.path = context.workspaceFiles[0];

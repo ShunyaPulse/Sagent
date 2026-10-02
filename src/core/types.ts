@@ -30,6 +30,7 @@ export interface AgentContext {
   metadata?: Record<string, any>;
   workspaceFiles?: string[];
   localFiles?: Record<string, string>;
+  activeFile?: string;
 }
 
 export type AgentStreamEvent =

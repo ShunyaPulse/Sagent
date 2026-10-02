@@ -110,10 +110,14 @@ export class AgentEngine {
         stepsExecuted++;
 
         // Call active LLM Provider
+        const systemPromptWithContext = context.activeFile
+          ? `${AGENT_SYSTEM_PROMPT}\n\n[Active Workspace Context: Currently active file is "${context.activeFile}". If the user asks to modify, replace, or read text without mentioning a file, target this file.]`
+          : AGENT_SYSTEM_PROMPT;
+
         const step = await provider.generateStep(
           messages,
           this.registry.getAll(),
-          AGENT_SYSTEM_PROMPT,
+          systemPromptWithContext,
         );
 
         if (step.tokensUsed) {
@@ -229,6 +233,35 @@ export class AgentEngine {
           continue;
         }
 
+        // If no tool calls, check if candidate answer falsely claims a file action occurred without executing any tool
+        const candidateAnswer =
+          step.finalAnswer ||
+          (step.thought && !step.toolCalls ? step.thought : "");
+        const isActionRequest =
+          /\b(?:replace|create|modify|write|patch|update|change|delete|remove|append)\b/i.test(
+            userMessage,
+          );
+        const claimsFileActionDone =
+          /(?:has been modified|has been created|has been updated|successfully replaced|successfully modified|successfully created|Action is complete)/i.test(
+            candidateAnswer,
+          );
+
+        if (
+          allToolCallsExecuted.length === 0 &&
+          isActionRequest &&
+          claimsFileActionDone &&
+          stepsExecuted < env.MAX_REACT_STEPS
+        ) {
+          const targetHint = context.activeFile
+            ? ` on active file "${context.activeFile}"`
+            : "";
+          messages.push({
+            role: "user",
+            content: `CRITICAL: You stated that the action is complete or file has been modified/created, but you did NOT call any tools! You CANNOT modify files through text alone. You MUST call "file_patcher" or "file_writer" now with the exact parameters to perform the requested change${targetHint}.`,
+          });
+          continue;
+        }
+
         // If no tool calls, model has reached a final answer
         if (step.finalAnswer) {
           finalAnswer = step.finalAnswer;
@@ -318,6 +351,19 @@ export class AgentEngine {
         } else {
           finalAnswerStr = `I have successfully updated \`${filePath}\`.`;
         }
+      }
+
+      // If no tools were executed but final answer claims file was modified/created, override hallucination
+      if (
+        allToolCallsExecuted.length === 0 &&
+        /\b(?:replace|create|modify|write|patch|update|change|delete|remove|append)\b/i.test(
+          userMessage,
+        ) &&
+        /(?:has been modified|has been created|has been updated|successfully replaced|successfully modified|successfully created|Action is complete)/i.test(
+          finalAnswerStr,
+        )
+      ) {
+        finalAnswerStr = `Unable to modify file: no tools were executed. Please specify the target file name explicitly (e.g., 'replace X with Y in ${context.activeFile || "filename"}').`;
       }
 
       // Ensure clean paragraph separation after bold headers at the start of lines without breaking mid-sentence bold items
