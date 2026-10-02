@@ -6,8 +6,8 @@ import { URL } from 'url';
  * Blocks private networks, localhost, link-local, and Cloud metadata endpoints (SSRF Defense).
  */
 export function isSafePublicIp(ip: string): boolean {
-  // IPv4 Checks
-  if (ip.includes('.')) {
+  // IPv4 Checks (dotted strings containing a colon are IPv6 with an embedded IPv4)
+  if (ip.includes('.') && !ip.includes(':')) {
     const parts = ip.split('.').map(Number);
     if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
       return false;
@@ -50,6 +50,23 @@ export function isSafePublicIp(ip: string): boolean {
     if (normalized.startsWith('fc') || normalized.startsWith('fd')) return false;
     // Link-local address fe80::/10
     if (normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return false;
+
+    // IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254): validate the embedded IPv4
+    // address so loopback/metadata targets cannot slip through in IPv6 notation.
+    const dottedIpv4 = normalized.match(
+      /(?::ffff:|::)((?:\d{1,3}\.){3}\d{1,3})$/
+    );
+    if (dottedIpv4) return isSafePublicIp(dottedIpv4[1]);
+
+    // IPv4-mapped IPv6 in hexadecimal form (e.g. ::ffff:7f00:1 => 127.0.0.1)
+    const hexMapped = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (hexMapped) {
+      const high = parseInt(hexMapped[1], 16);
+      const low = parseInt(hexMapped[2], 16);
+      return isSafePublicIp(
+        `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`
+      );
+    }
 
     return true;
   }

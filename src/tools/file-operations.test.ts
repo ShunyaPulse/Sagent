@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   fileWriterTool,
   fileReaderTool,
+  fileEditorTool,
   directoryListerTool,
   resolveSafePath,
 } from "./file-operations.js";
@@ -30,6 +31,11 @@ test("resolveSafePath: blocks protected sensitive files (.env, .git)", () => {
     () => resolveSafePath(".env.local"),
     /Security Policy Violation/,
   );
+});
+
+test("resolveSafePath: blocks sibling paths sharing the workspace prefix", () => {
+  const sibling = `${process.cwd()}-evil/secret.txt`;
+  assert.throws(() => resolveSafePath(sibling), /Access Denied/);
 });
 
 test("fileWriterTool & fileReaderTool: creates, reads, and cleans up workspace file", async () => {
@@ -63,4 +69,95 @@ test("fileWriterTool & fileReaderTool: creates, reads, and cleans up workspace f
 
   // Cleanup
   await fs.rm(TEST_DIR, { recursive: true, force: true });
+});
+
+test("fileEditorTool: replace, insert, delete, append and prepend", async () => {
+  const testFile = "scratch/test-file-ops/edit.txt";
+  await fileWriterTool.execute(
+    { path: testFile, content: "alpha\nbeta\ngamma\n", overwrite: true },
+    mockContext,
+  );
+
+  // replace (unique)
+  const replaceRes = await fileEditorTool.execute(
+    { path: testFile, operation: "replace", oldText: "beta", newText: "BETA" },
+    mockContext,
+  );
+  assert.equal(replaceRes.success, true);
+
+  // insert before line 2
+  await fileEditorTool.execute(
+    { path: testFile, operation: "insert", line: 2, newText: "inserted" },
+    mockContext,
+  );
+
+  // delete 2 lines starting at line 1
+  await fileEditorTool.execute(
+    { path: testFile, operation: "delete", line: 1, count: 2 },
+    mockContext,
+  );
+
+  // append and prepend
+  await fileEditorTool.execute(
+    { path: testFile, operation: "append", newText: "delta" },
+    mockContext,
+  );
+  await fileEditorTool.execute(
+    { path: testFile, operation: "prepend", newText: "start\n" },
+    mockContext,
+  );
+
+  const final = await fileReaderTool.execute(
+    { path: testFile, maxLines: 50 },
+    mockContext,
+  );
+  assert.equal(final.content, "start\nBETA\ngamma\ndelta");
+
+  await fs.rm(TEST_DIR, { recursive: true, force: true });
+});
+
+test("fileEditorTool: rejects ambiguous replace and invalid target", async () => {
+  const testFile = "scratch/test-file-ops/ambiguous.txt";
+  await fileWriterTool.execute(
+    { path: testFile, content: "dup\ndup\n", overwrite: true },
+    mockContext,
+  );
+
+  const ambiguous = await fileEditorTool.execute(
+    { path: testFile, operation: "replace", oldText: "dup", newText: "x" },
+    mockContext,
+  );
+  assert.equal(ambiguous.success, false);
+  assert.match(ambiguous.error, /matched 2 times/);
+
+  const replaceAll = await fileEditorTool.execute(
+    {
+      path: testFile,
+      operation: "replace",
+      oldText: "dup",
+      newText: "x",
+      replaceAll: true,
+    },
+    mockContext,
+  );
+  assert.equal(replaceAll.success, true);
+
+  const missing = await fileEditorTool.execute(
+    { path: "scratch/test-file-ops/does-not-exist.txt", operation: "append", newText: "x" },
+    mockContext,
+  );
+  assert.equal(missing.success, false);
+  assert.match(missing.error, /File not found/);
+
+  await fs.rm(TEST_DIR, { recursive: true, force: true });
+});
+
+test("fileEditorTool: schema applies defaults for count and replaceAll", () => {
+  const parsed = fileEditorTool.parameters.parse({
+    path: "notes.txt",
+    operation: "append",
+    newText: "hello",
+  });
+  assert.equal(parsed.count, 1);
+  assert.equal(parsed.replaceAll, false);
 });

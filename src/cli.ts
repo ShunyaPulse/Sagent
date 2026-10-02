@@ -28,6 +28,10 @@ function formatToolCallInfo(tool: string, args: Record<string, any>): string {
         : 0;
     return `"${args.path || ""}", ${bytes} B`;
   }
+  if (tool === "file_editor") {
+    const target = args.line ? `:${args.line}` : "";
+    return `"${args.path || ""}"${target} (${args.operation || "edit"})`;
+  }
   if (tool === "file_reader") {
     return `"${args.path || ""}"`;
   }
@@ -35,7 +39,7 @@ function formatToolCallInfo(tool: string, args: Record<string, any>): string {
     return `"${args.path || "."}"`;
   }
   if (tool === "sql_vector_search") {
-    const q = args.query || "";
+    const q = args.searchQuery || args.query || "";
     return `"${q.length > 30 ? q.slice(0, 30) + "..." : q}"`;
   }
   if (tool === "data_calculator") {

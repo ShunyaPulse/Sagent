@@ -6,7 +6,7 @@ import {
   ToolCall,
 } from "../core/types.js";
 import { env } from "../config/env.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { toolParametersToJsonSchema } from "../tools/schema.js";
 
 export class CloudflareWorkersAIProvider implements LLMProvider {
   public name = "cloudflare";
@@ -44,7 +44,7 @@ export class CloudflareWorkersAIProvider implements LLMProvider {
     const toolSpecs = tools.map((t) => ({
       name: t.name,
       description: t.description,
-      parameters: zodToJsonSchema(t.parameters),
+      parameters: toolParametersToJsonSchema(t.parameters),
     }));
 
     const enrichedSystemPrompt = `
@@ -95,6 +95,14 @@ Response:
   "thought": "User wants to view file 'abc'. I will use file_reader.",
   "tool": "file_reader",
   "arguments": { "path": "abc" }
+}
+
+User: "in abc, change foo to bar"
+Response:
+{
+  "thought": "User wants to modify an existing file. I will use file_editor replace.",
+  "tool": "file_editor",
+  "arguments": { "path": "abc", "operation": "replace", "oldText": "foo", "newText": "bar" }
 }
 
 CRITICAL: In "finalAnswer", NEVER include "Thought:", "Final Answer:", or scratchpad tokens. Provide ONLY the final clean text addressed to the user.
@@ -308,32 +316,42 @@ CRITICAL: In "finalAnswer", NEVER include "Thought:", "Final Answer:", or scratc
       throw new Error(`Cloudflare stream error: ${errText}`);
     }
 
-    // Read SSE stream
+    // Read SSE stream, buffering partial lines so events split across
+    // network chunks are not dropped.
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let fullText = "";
+    let buffer = "";
+
+    const handleLine = (line: string) => {
+      if (!line.startsWith("data: ") || line.includes("[DONE]")) return;
+      try {
+        const parsed = JSON.parse(line.slice(6));
+        const token = parsed.response || "";
+        if (token) {
+          fullText += token;
+          onToken(token);
+        }
+      } catch {
+        // ignore non-json SSE lines
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n");
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith("data: ") && !line.includes("[DONE]")) {
-          try {
-            const parsed = JSON.parse(line.slice(6));
-            const token = parsed.response || "";
-            if (token) {
-              fullText += token;
-              onToken(token);
-            }
-          } catch {
-            // ignore non-json SSE lines
-          }
-        }
+        handleLine(line);
       }
+    }
+
+    if (buffer) {
+      handleLine(buffer);
     }
 
     return { fullText, tokensUsed: 0 };
